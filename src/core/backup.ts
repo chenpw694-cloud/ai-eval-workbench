@@ -1,3 +1,4 @@
+import { isAnchorMode, ratingErrors, ratingSchemeErrors, questionDimensions } from './ratings.ts';
 import { validateQuality } from './quality.ts';
 import type { AssetMetadata, Evaluation, Project, ProjectBundle } from './model.ts';
 import { latestEvaluations } from './assessment.ts';
@@ -31,7 +32,7 @@ function auditErrors(raw: unknown, projectId: string): string[] {
 export function validateBackupStructure(raw: unknown): string[] {
   const errors: string[] = [];
   const fail = (message: string) => { if (errors.length < 30) errors.push(message); };
-  if (!object(raw) || raw.format !== 'eval-studio-project-backup' || raw.schemaVersion !== 1) return ['不是支持的正式项目备份，不能使用演示备份或阶段提交包恢复'];
+  if (!object(raw) || raw.format !== 'eval-studio-project-backup' || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)) return ['不是支持的正式项目备份，不能使用演示备份或阶段提交包恢复'];
   if (!object(raw.bundle) || !Array.isArray(raw.snapshots) || !Array.isArray(raw.blobs)) return ['备份缺少项目、快照或图片数据'];
   const bundle = raw.bundle;
   const p = bundle.project;
@@ -65,6 +66,8 @@ export function validateBackupStructure(raw: unknown): string[] {
   }
   const scheme = p.scheme;
   if (!string(scheme.id) || !string(scheme.name) || !string(scheme.version) || !Array.isArray(scheme.dimensions) || !Array.isArray(scheme.tags) || !object(scheme.policies)) return [...errors, '评分方案结构无效'];
+  errors.push(...ratingSchemeErrors(scheme as unknown as import('./model.ts').Scheme));
+  if (raw.schemaVersion !== (isAnchorMode(scheme as unknown as import('./model.ts').Scheme) ? 2 : 1)) fail('不是支持的正式项目备份：版本与评分方式不一致，请升级工作台');
   const dimensionIds = uniqueIds(scheme.dimensions, '维度');
   if (scheme.jointReview !== undefined) errors.push(...validateJointPolicy(scheme.jointReview as import('./joint.ts').JointPolicy));
   if (scheme.dimensions.some(row => !object(row) || !string(row.name) || !string(row.method) || !finite(row.weight) || row.weight < 0 || row.weight > 100)) fail('维度字段或权重无效');
@@ -89,6 +92,7 @@ export function validateBackupStructure(raw: unknown): string[] {
     if (!object(row) || row.projectId !== p.id || !questionIds.has(String(row.questionId)) || !productIds.has(String(row.productId)) || !(memberIds.has(String(row.reviewerId)) || (row.status === 'draft' && row.reviewerId === '')) || !Number.isSafeInteger(row.revision) || Number(row.revision) < 1 || !(row.parentId === null || recordIds.has(String(row.parentId))) || !['draft', 'submitted'].includes(String(row.status)) || !Array.isArray(row.mediaIds) || !row.mediaIds.every(id => string(id) && assetIds.has(id)) || !(row.bestMediaId === null || (string(row.bestMediaId) && row.mediaIds.includes(row.bestMediaId))) || !Array.isArray(row.mediaChecks) || !row.mediaChecks.every(item => object(item) && row.mediaIds instanceof Array && row.mediaIds.includes(item.mediaId) && [null, true, false].includes(item.usable as null | boolean) && [null, true, false].includes(item.infringement as null | boolean)) || !assignmentsValid(row.tags) || !(row.seconds === null || (finite(row.seconds) && row.seconds >= 0)) || typeof row.failed !== 'boolean' || !string(row.failureReason) || !string(row.notes) || !date(row.createdAt) || !hash(row.schemeHash) || !hash(row.questionsHash)) fail('评测修订字段或引用无效');
     else {
       const record = row as unknown as Evaluation;
+      errors.push(...ratingErrors(p.scheme as unknown as import('./model.ts').Scheme, record.ratings, questionDimensions, false));
       if (record.mediaIds.some(id => !assets.some(asset => asset.id === id && asset.role === 'output' && asset.productId === record.productId && asset.questionId === record.questionId))) fail('评测引用了其他产品或题目的出图');
     }
   }
@@ -102,6 +106,7 @@ export function validateBackupStructure(raw: unknown): string[] {
     if (latestEvaluations(records).length !== groups.size) fail('评测修订链存在分叉、循环或断裂，不能恢复');
   }
   for (const row of bundle.walkthroughs) {
+    if (object(row)) errors.push(...ratingErrors(p.scheme as unknown as import('./model.ts').Scheme, row.ratings, ['D'], false));
     if (!object(row) || row.projectId !== p.id || !productIds.has(String(row.productId)) || !['background', 'color', 'expand'].includes(String(row.task)) || !['draft', 'submitted'].includes(String(row.status)) || typeof row.completed !== 'boolean' || !(row.steps === null || (Number.isSafeInteger(row.steps) && Number(row.steps) >= 0)) || !assignmentsValid(row.tags) || !string(row.notes)) fail('走查记录字段无效');
   }
   const experienceIds = new Set<string>();
@@ -133,7 +138,7 @@ export function validateArchiveMetadata(raw: unknown): string[] {
     if (object(asset) && !byHash.has(asset.sha256)) byHash.set(asset.sha256, { sha256: asset.sha256, mime: asset.mime, data: '' });
   }
   return validateBackupStructure({
-    format: 'eval-studio-project-backup', schemaVersion: 1,
+    format: 'eval-studio-project-backup', schemaVersion: isAnchorMode((raw.bundle as unknown as ProjectBundle).project.scheme) ? 2 : 1,
     bundle: raw.bundle, snapshots: raw.snapshots, audits: raw.audits, blobs: [...byHash.values()],
   });
 }

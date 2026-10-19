@@ -1,3 +1,5 @@
+import type { DimensionRatings } from './model.ts';
+import { isAnchorMode, imageRatingDimensions, ratingErrors, recordDimensionScore } from './ratings.ts';
 import type { Evaluation, ProjectBundle, TagAssignment } from './model.ts';
 import { allowedSeverities, latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
 import { mergeJoint, validateJoint } from './joint.ts';
@@ -6,8 +8,8 @@ import { mergeReportNotes, validateReportNotes } from './report-notes.ts';
 export type QualityKind = 'calibration' | 'review' | 'recheck' | 'gsb';
 export type QualityBatch = { id: string; kind: QualityKind; seed: string; sampling?: 'mulberry32-fisher-yates-v1'; createdAt: string; schemeHash: string; questionsHash: string; candidates: string[]; sampled: string[]; trial: boolean; range: 'ABCF'; policy: 'dimension-gap-2-or-high-tag-set'; sourceBatchId: string | null };
 export type QualityTask = { id: string; batchId: string; kind: QualityKind; questionId: string; reviewerId: string; evidence: { productId: string; baselineId: string; mediaIds: string[]; bestMediaId: string | null }[]; demo: boolean; previouslySeen: boolean };
-export type QualityJudgment = { id: string; taskId: string; parentId: string | null; revision: number; reviewerId: string; tags: TagAssignment[]; choice: 'win' | 'tie' | 'loss' | null; unable: boolean; exposed: boolean; notes: string; createdAt: string };
-export type QualityDecision = { id: string; taskId: string; judgmentId: string; parentId: string | null; participants: string[]; tags: TagAssignment[]; usable: boolean; reason: string; createdAt: string };
+export type QualityJudgment = { id: string; taskId: string; parentId: string | null; revision: number; reviewerId: string; ratings?: DimensionRatings; tags: TagAssignment[]; choice: 'win' | 'tie' | 'loss' | null; unable: boolean; exposed: boolean; notes: string; createdAt: string };
+export type QualityDecision = { id: string; taskId: string; judgmentId: string; parentId: string | null; participants: string[]; ratings?: DimensionRatings; tags: TagAssignment[]; usable: boolean; reason: string; createdAt: string };
 export type QualityState = { batches: QualityBatch[]; tasks: QualityTask[]; judgments: QualityJudgment[]; decisions: QualityDecision[]; finals?: { baselineId: string; decisionId: string }[]; joint?: import('./joint.ts').JointState; reportNotes?: import('./report-notes.ts').ReportNotes[]; space?: { type: 'blind' | 'return'; batchId: string; reviewerId: string } };
 export const emptyQuality = (): QualityState => ({ batches: [], tasks: [], judgments: [], decisions: [] });
 const clean = (value: unknown): string => JSON.stringify(value, (_, row) => row && typeof row === 'object' && !Array.isArray(row) ? Object.fromEntries(Object.keys(row).sort().map(key => [key, row[key]])) : row);
@@ -22,10 +24,13 @@ export function validateQualityExtension(previous: QualityState, next: QualitySt
 export function dimensionScore(tags: TagAssignment[], dimension: string, bundle: ProjectBundle): number {
   return Math.min(5, ...tags.filter(tag => bundle.project.scheme.tags.find(def => def.code === tag.code)?.dimension === dimension).map(tag => ({ P0: 1, P1: 2, P2: 3, P3: 4 })[tag.severity]));
 }
-export function disagreement(a: TagAssignment[], b: TagAssignment[], bundle: ProjectBundle): boolean {
+export function disagreement(a: TagAssignment[], b: TagAssignment[], bundle: ProjectBundle, aRatings?: DimensionRatings, bRatings?: DimensionRatings): boolean {
   const relevant = (tags: TagAssignment[]) => tags.filter(tag => imageDims.has(bundle.project.scheme.tags.find(def => def.code === tag.code)?.dimension ?? ''));
   const high = (tags: TagAssignment[]) => relevant(tags).filter(tag => tag.severity === 'P0' || tag.severity === 'P1').map(tag => `${tag.code}:${tag.severity}`).sort();
-  return clean(high(a)) !== clean(high(b)) || [...imageDims].some(dim => Math.abs(dimensionScore(a, dim, bundle) - dimensionScore(b, dim, bundle)) >= 2);
+  return clean(high(a)) !== clean(high(b)) || [...imageDims].some(dim => Math.abs((recordDimensionScore(bundle.project.scheme, { tags: a, ratings: aRatings }, dim) ?? NaN) - (recordDimensionScore(bundle.project.scheme, { tags: b, ratings: bRatings }, dim) ?? NaN)) >= 2);
+}
+export function judgmentDisagreement(a: { tags: TagAssignment[]; ratings?: DimensionRatings }, b: { tags: TagAssignment[]; ratings?: DimensionRatings }, bundle: ProjectBundle): boolean {
+  return disagreement(a.tags, b.tags, bundle, a.ratings, b.ratings);
 }
 export function seededSample(ids: string[], count: number, seed: string): string[] {
   let state = 2166136261;
@@ -123,6 +128,7 @@ export function validateQuality(raw: unknown, bundle: ProjectBundle): string[] {
     const task = state.tasks.find(task => task.id === row.taskId);
     const parent = state.judgments.find(parent => parent.id === row.parentId);
     if (!task || row.reviewerId !== task.reviewerId || !Number.isSafeInteger(row.revision) || (row.parentId === null ? row.revision !== 1 : !parent || parent.taskId !== row.taskId || parent.revision + 1 !== row.revision) || !tagsValid(row.tags) || typeof row.unable !== 'boolean' || typeof row.exposed !== 'boolean' || typeof row.notes !== 'string' || !Number.isFinite(Date.parse(row.createdAt)) || (task.kind === 'gsb' ? (!(row.unable && row.choice === null) && !['win', 'tie', 'loss'].includes(String(row.choice))) || row.tags.length > 0 : row.choice !== null) || (row.unable && !row.notes.trim())) fail('独立判断字段或修订链无效');
+    errors.push(...ratingErrors(bundle.project.scheme, row.ratings, task?.kind === 'gsb' ? [] : imageRatingDimensions, !!task && task.kind !== 'gsb' && !row.unable && isAnchorMode(bundle.project.scheme)));
     if (task && !row.unable && task.evidence.some(evidence => !evidence.bestMediaId)) fail('没有最佳图的任务必须说明无法判断');
   }
   if (latestQuality(state.judgments, row => row.taskId).length !== new Set(state.judgments.map(row => row.taskId)).size) fail('独立判断存在分叉，须在原空间创建单一后继后重新导出');
@@ -130,6 +136,10 @@ export function validateQuality(raw: unknown, bundle: ProjectBundle): string[] {
     const task = state.tasks.find(task => task.id === row.taskId);
     const parent = state.decisions.find(parent => parent.id === row.parentId);
     if (!task || task.kind === 'gsb' || !state.judgments.some(judgment => judgment.id === row.judgmentId && judgment.taskId === task.id) || (row.parentId !== null && (!parent || parent.taskId !== row.taskId)) || !Array.isArray(row.participants) || !row.participants.length || row.participants.some(id => !member(id)) || !tagsValid(row.tags) || typeof row.usable !== 'boolean' || typeof row.reason !== 'string' || !row.reason.trim() || !Number.isFinite(Date.parse(row.createdAt)) || (row.usable && row.tags.some(tag => tag.severity === 'P0' || tag.severity === 'P1'))) fail('裁决字段、引用或依据无效');
+  }
+  for (const row of state.decisions) {
+    errors.push(...ratingErrors(bundle.project.scheme, row.ratings, imageRatingDimensions, isAnchorMode(bundle.project.scheme)));
+    if (isAnchorMode(bundle.project.scheme) && row.usable && imageRatingDimensions.some(id => (row.ratings?.[id]?.score ?? 5) <= 2)) fail('低分图像裁决不可标为可用');
   }
   if (latestQuality(state.decisions, row => row.taskId).length !== new Set(state.decisions.map(row => row.taskId)).size) fail('裁决记录存在分叉');
   if (state.space && (!['blind', 'return'].includes(state.space.type) || !member(state.space.reviewerId) || !state.batches.some(batch => batch.id === state.space?.batchId) || state.tasks.some(task => task.batchId !== state.space?.batchId || task.reviewerId !== state.space?.reviewerId) || state.decisions.length)) fail('独立空间包含越界任务或裁决');
@@ -185,7 +195,7 @@ export function finalQualityBundle(bundle: ProjectBundle): ProjectBundle {
     const decision = state.decisions.find(row => row.id === reference?.decisionId);
     const task = state.tasks.find(row => row.id === decision?.taskId);
     if (!decision || !task || task.kind === 'calibration' || !judgments.some(row => row.id === decision.judgmentId)) return record;
-    return { ...record, tags: [...record.tags.filter(tag => !imageDims.has(bundle.project.scheme.tags.find(def => def.code === tag.code)?.dimension ?? '')), ...decision.tags], mediaChecks: record.mediaChecks.map(check => check.mediaId === record.bestMediaId ? { ...check, usable: decision.usable, infringement: decision.tags.some(tag => tag.code === 'F-01') } : check) };
+    return { ...record, ...(isAnchorMode(bundle.project.scheme) ? { ratings: { ...record.ratings, ...decision.ratings } } : {}), tags: [...record.tags.filter(tag => !imageDims.has(bundle.project.scheme.tags.find(def => def.code === tag.code)?.dimension ?? '')), ...decision.tags], mediaChecks: record.mediaChecks.map(check => check.mediaId === record.bestMediaId ? { ...check, usable: decision.usable, infringement: decision.tags.some(tag => tag.code === 'F-01') } : check) };
   }) };
 }
 export function qualitySummary(bundle: ProjectBundle) {
@@ -197,9 +207,9 @@ export function qualitySummary(bundle: ProjectBundle) {
     for (const task of tasks) {
       const judgment = judgments.find(row => row.taskId === task.id);
       const original = bundle.evaluations.find(row => row.id === task.evidence[0].baselineId);
-      if (!judgment || judgment.unable || !original) continue;
+      if (!judgment || judgment.unable || !original || ratingErrors(bundle.project.scheme, judgment.ratings, imageRatingDimensions, isAnchorMode(bundle.project.scheme)).length || ratingErrors(bundle.project.scheme, original.ratings, ['A','B','C','F','G'], isAnchorMode(bundle.project.scheme)).length) continue;
       if (judgment.exposed || task.previouslySeen) exposed++;
-      completed++; if (disagreement(original.tags, judgment.tags, bundle)) different++;
+      completed++; if (judgmentDisagreement(original, judgment, bundle)) different++;
     }
     return { batchId: batch.id, kind: batch.kind, productId: product.id, expected: tasks.length, completed, different, exposed, rate: completed ? (completed - different) / completed : null, trigger: batch.kind === 'review' && tasks.length === 10 && completed === 10 && different > 3, trial: batch.trial };
   }).filter(row => row.expected));
@@ -210,7 +220,7 @@ export function qualitySummary(bundle: ProjectBundle) {
     return { productId: product.id, expected: tasks.length, n: rows.length, wins, losses, ties: rows.length - wins - losses, net: rows.length ? (wins - losses) / rows.length : null, demo: tasks.some(task => task.demo), exposed: rows.filter(row => row.exposed).length };
   }).filter(row => row.expected);
   const decisions = latestQuality(state.decisions, row => row.taskId);
-  const unresolved = state.tasks.filter(task => (task.kind === 'review' || task.kind === 'recheck') && (() => { const row = judgments.find(row => row.taskId === task.id); const original = bundle.evaluations.find(row => row.id === task.evidence[0].baselineId); return !!row && !row.unable && !!original && disagreement(original.tags, row.tags, bundle) && !decisions.some(decision => decision.taskId === task.id && decision.judgmentId === row.id); })());
+  const unresolved = state.tasks.filter(task => (task.kind === 'review' || task.kind === 'recheck') && (() => { const row = judgments.find(row => row.taskId === task.id); const original = bundle.evaluations.find(row => row.id === task.evidence[0].baselineId); return !!row && !row.unable && !!original && judgmentDisagreement(original, row, bundle) && !decisions.some(decision => decision.taskId === task.id && decision.judgmentId === row.id); })());
   return { reviews, gsb, unresolved, completed: judgments.length, expected: state.tasks.length };
 }
 

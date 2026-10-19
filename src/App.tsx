@@ -12,10 +12,12 @@ const DashboardPage = lazy(() => import('./pages/Insights').then(m => ({ default
 const QualityPage = lazy(() => import('./pages/Insights').then(m => ({ default: m.QualityPage })));
 const SchemePage = lazy(() => import('./pages/Insights').then(m => ({ default: m.SchemePage })));
 const ReportDemo = lazy(() => import('./pages/ReportDemo'));
+const AnchorDemo = lazy(() => import('./pages/AnchorDemo'));
 
 const navigation: { id: Page; label: string; icon: LucideIcon; count?: string }[] = [
   { id: 'overview', label: '项目总览', icon: LayoutDashboard },
   { id: 'scheme', label: '方案与题库', icon: SlidersHorizontal },
+  { id: 'anchors', label: '锚点打分', icon: BookOpen },
   { id: 'tasks', label: '我的任务', icon: ListTodo, count: '8' },
   { id: 'quality', label: '质量控制', icon: ShieldCheck, count: '3' },
   { id: 'compare', label: '对比评审', icon: Columns2 },
@@ -85,6 +87,7 @@ function DemoApp() {
         <div className="preview-ribbon"><span><span className="preview-dot"/>演示项目</span><p>所有产品、图片与统计均为界面演示；你保存的操作仅保留在当前浏览器。</p><button onClick={() => { location.hash = '/projects'; }}>进入正式项目 <ArrowRight size={13}/></button><button onClick={() => setModal('about')}>预览说明 <ArrowUpRight size={12}/></button></div>
         <Suspense fallback={<div className="empty-state"><LoaderCircle size={22} className="spin"/>正在打开页面…</div>}>
         {page === 'overview' && <Overview navigate={navigate} records={records} onExport={exportData} onFlow={() => setModal('flow')}/>}
+        {page === 'anchors' && <AnchorDemo onToast={notify}/>}
         {page === 'scheme' && <SchemePage onToast={notify}/>}
         {page === 'tasks' && (taskView === 'evaluation' ? <><button className="back-link" onClick={() => setTaskView('list')}><ChevronLeft size={15}/>返回任务列表</button><Evaluation key={initialQuestion} initialQuestionId={initialQuestion} onToast={notify} onSaved={refresh}/></> : <Tasks search={taskSearch} onSearch={setTaskSearch} records={records} onEvaluate={id => navigate('tasks', true, id)} onToast={notify}/>)}
         {page === 'quality' && <QualityPage onToast={notify}/>}

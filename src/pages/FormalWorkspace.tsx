@@ -1,3 +1,5 @@
+import AnchorRatings from '../components/AnchorRatings';
+import { isAnchorMode, ratingErrors } from '../core/ratings';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, Settings2, ShieldCheck, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
 import type { Evaluation, Experience, Project, ProjectBundle, TagAssignment, Walkthrough } from '../core/model';
@@ -272,7 +274,7 @@ function FormalOverview({ bundle, onGo, onStart }: { bundle: ProjectBundle; onGo
     <section className="panel"><PanelHeading title="被测产品与实际进度" subtitle="缺失数据保留为空，不以演示值或满分补齐。"/>
       <div className="table-wrap"><table className="table formal-data-table"><thead><tr><th>产品 / 版本</th><th>负责人</th><th>已提交</th><th>图片可用率</th><th>总分 / 100</th><th>结论状态</th></tr></thead><tbody>{project.products.map(product => {
         const result = results.find(item => item.productId === product.id);
-        return <tr key={product.id}><td><strong>{product.name || '产品名称待填写'}</strong><small>{product.version || '版本或档位待填写'}{product.demo ? ' · 模拟对象' : ''}</small></td><td>{project.members.find(member => member.id === product.ownerId)?.name || '未分配'}</td><td>{result?.submitted ?? 0} / {result?.expected ?? project.expectedQuestionCount}</td><td>{result?.usableRate == null ? '—' : `${(result.usableRate * 100).toFixed(1)}%`}</td><td>{result?.total == null ? '待补齐' : (result.total * 20).toFixed(1)}</td><td><Eligibility state={result?.eligibility ?? 'pending'}/></td></tr>;
+        return <tr key={product.id}><td><strong>{product.name || '产品名称待填写'}</strong><small>{product.version || '版本或档位待填写'}{product.demo ? ' · 模拟对象' : ''}</small></td><td>{project.members.find(member => member.id === product.ownerId)?.name || '未分配'}</td><td>{result?.submitted ?? 0} / {result?.expected ?? project.expectedQuestionCount}</td><td>{result?.usableRate == null ? '—' : `${(result.usableRate * 100).toFixed(1)}%`}</td><td>{result?.total == null ? '待补齐' : (result.total * (isAnchorMode(project.scheme) ? 1 : 20)).toFixed(isAnchorMode(project.scheme) ? 2 : 1)}</td><td><Eligibility state={result?.eligibility ?? 'pending'}/></td></tr>;
       })}</tbody></table></div>
     </section>
     <div className="formal-next-grid">
@@ -298,11 +300,11 @@ function FormalResults({ bundle }: { bundle: ProjectBundle }) {
       action={<button className="btn" onClick={() => downloadJson(`${project.name}-score-details.json`, { projectId: project.id, schemeHash: project.schemeHash, basis: useFinal ? 'adjudicated-reference' : 'original', finalReferences: bundle.quality?.finals ?? [], results, generatedAt: new Date().toISOString() })}><Download size={15}/>导出得分明细</button>}/>
     {!!bundle.quality?.finals?.length && <label className="quality-check"><input type="checkbox" checked={useFinal} onChange={event => setUseFinal(event.target.checked)}/>查看裁决口径参考分（保留原始初评；不代表完整质量归档已完成）</label>}
     <div className="formal-note"><InfoIcon/>完整总分需要七个维度数据齐全。尚未完成的维度可显示参考均分与样本数，但不会生成完整总分。</div>
-    <section className="panel formal-score-panel"><PanelHeading title="七维度计算结果" subtitle="D 来自编辑走查，E 来自可用率 / 速度 / 成本，G 为标签分与整体体验分各占一半。"/>
+    <section className="panel formal-score-panel"><PanelHeading title="七维度计算结果" subtitle={isAnchorMode(project.scheme) ? '锚点直评分：A/B/C/F 为逐题均分；D 为编辑任务均分；E 为量化指标；G 为逐题锚点与整体体验各一半。' : 'D 来自编辑走查，E 来自可用率 / 速度 / 成本，G 为标签分与整体体验分各占一半。'}/>
       <div className="table-wrap"><table className="table formal-data-table formal-score-table"><thead><tr><th>维度 / 权重</th>{project.products.map(product => <th key={product.id}>{product.name || '未命名产品'}{product.demo && <small>模拟</small>}</th>)}</tr></thead><tbody>{project.scheme.dimensions.map(dimension => <tr key={dimension.id}><td><strong>{dimension.id} · {dimension.name}</strong><small>{dimension.weight}%</small></td>{results.map(result => {
         const metric = result.dimensions[dimension.id as keyof typeof result.dimensions];
         return <td key={result.productId}><strong className={metric?.complete ? 'formal-complete-score' : 'formal-partial-score'}>{metric?.value == null ? '—' : metric.value.toFixed(2)}</strong><small>{metric?.n ?? 0} / {metric?.expected ?? 0}{metric?.complete ? ' · 齐全' : ' · 待补齐'}</small></td>;
-      })}</tr>)}<tr className="formal-total-row"><td><strong>加权总分</strong><small>百分制</small></td>{results.map(result => <td key={result.productId}><strong>{result.total == null ? '—' : (result.total * 20).toFixed(1)}</strong><small>{result.total == null ? '七维数据尚未齐全' : '原始 5 分制 × 20'}</small></td>)}</tr></tbody></table></div>
+      })}</tr>)}<tr className="formal-total-row"><td><strong>加权总分</strong><small>{isAnchorMode(project.scheme) ? '5 分制' : '百分制'}</small></td>{results.map(result => <td key={result.productId}><strong>{result.total == null ? '—' : (result.total * (isAnchorMode(project.scheme) ? 1 : 20)).toFixed(isAnchorMode(project.scheme) ? 2 : 1)}</strong><small>{result.total == null ? '七维数据尚未齐全' : isAnchorMode(project.scheme) ? '按权重汇总 / 5' : '原始 5 分制 × 20'}</small></td>)}</tr></tbody></table></div>
     </section>
     <section className="panel formal-ranking"><PanelHeading title="可推荐产品排名" subtitle="仅包含非模拟、未被否决、检查完成且具有完整总分的产品。"/>
       {rank.length ? rank.map((result, index) => <div key={result.productId} className="formal-rank-row"><span>{index + 1}</span><strong>{project.products.find(product => product.id === result.productId)?.name}</strong><b>{(result.total! * 20).toFixed(1)}</b></div>) : <div className="formal-inline-empty">当前没有同时满足推荐条件与完整总分的产品。</div>}
@@ -364,6 +366,8 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
     if (submit) {
       if (tasks.some(task => task.steps === null || !Number.isSafeInteger(task.steps) || task.steps < 0)) { onToast('请填写三个任务的操作步数'); return; }
       if (tasks.some(task => !task.completed && (!task.tags.length || !task.notes.trim()))) { onToast('未完成任务需记录 D 问题标签和原因，不能按无问题计满分'); return; }
+      const anchorErrors = tasks.flatMap(task => ratingErrors(project.scheme, task.ratings, ['D'], isAnchorMode(project.scheme)));
+      if (anchorErrors.length) { onToast(anchorErrors[0]); return; }
       if (!score || !Number.isInteger(Number(score)) || Number(score) < 1 || Number(score) > 5) { onToast('请给出整体体验分（1–5）'); return; }
     }
     setSaving(true);
@@ -384,6 +388,7 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
         {tasks.map((task, index) => <div className="formal-walk-task" key={task.id}>
           <div className="formal-walk-title"><span>0{index + 1}</span><div><h3>{walkthroughTasks[index].name}</h3><p>{walkthroughTasks[index].request}</p></div><Pill tone={task.status === 'submitted' ? 'green' : 'neutral'}>{task.status === 'submitted' ? '已提交' : '草稿'}</Pill></div>
           <div className="formal-walk-inputs"><label className="field">操作步数<input className="input" type="number" min="0" step="1" value={task.steps ?? ''} onChange={event => update(index, { steps: event.target.value === '' ? null : Number(event.target.value) })}/></label><label className="formal-checkbox"><input type="checkbox" checked={task.completed} onChange={event => update(index, { completed: event.target.checked })}/>已完成目标</label></div>
+          {isAnchorMode(project.scheme) && <AnchorRatings scheme={project.scheme} dimensions={['D']} values={task.ratings ?? {}} onChange={ratings => update(index, { ratings })}/>}
           <div className="formal-walk-tags">{editTags.map(tag => {
             const selected = task.tags.find(item => item.code === tag.code);
             return <div key={tag.code}><label><input type="checkbox" checked={!!selected} onChange={event => update(index, { tags: event.target.checked ? [...task.tags, { code: tag.code, severity: tag.severity }] : task.tags.filter(item => item.code !== tag.code) })}/>{tag.code} · {tag.name}</label>{selected && <select className="input" aria-label={`${walkthroughTasks[index].name}${tag.name}严重等级`} value={selected.severity} onChange={event => update(index, { tags: task.tags.map(item => item.code === tag.code ? { ...item, severity: event.target.value as TagAssignment['severity'] } : item) })}>{allowedSeverities(tag).map(level => <option key={level}>{level}</option>)}</select>}</div>;
@@ -392,7 +397,7 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
         </div>)}
       </section>
       <div className="formal-walk-bottom">
-        <section className="panel formal-form-panel"><PanelHeading title="整体产品体验" subtitle="与逐题 G 标签分各占 G 维度的 50%。"/>
+        <section className="panel formal-form-panel"><PanelHeading title="整体产品体验" subtitle={isAnchorMode(project.scheme) ? '与逐题 G 锚点分各占 G 维度的 50%。' : '与逐题 G 标签分各占 G 维度的 50%。'}/>
           <label className="field">整体体验分<select className="input" value={score} onChange={event => { setScore(event.target.value); setDirty(true); }}><option value="">尚未打分</option><option value="5">5 · 操作顺畅，无需摸索</option><option value="4">4 · 少量不便，不影响完成</option><option value="3">3 · 需要摸索，或步骤偏多</option><option value="2">2 · 操作困难，勉强完成</option><option value="1">1 · 无法完成任务</option></select></label>
           <label className="field">体验依据<textarea className="input" rows={3} value={experienceNotes} onChange={event => { setExperienceNotes(event.target.value); setDirty(true); }}/></label>
           <label className="field">评测期间总花费（统一币种）<input className="input" type="number" min="0" step="0.01" placeholder="未知留空；免费请明确填 0" value={cost} onChange={event => { setCost(event.target.value); setDirty(true); }}/></label>

@@ -1,7 +1,7 @@
 import type { Severity } from '../core/scoring';
 import scheme from '../../schemes/ecommerce-t2i/scheme.json';
 
-export type Page = 'overview' | 'scheme' | 'tasks' | 'quality' | 'compare' | 'dashboard' | 'report' | 'sync';
+export type Page = 'anchors' | 'overview' | 'scheme' | 'tasks' | 'quality' | 'compare' | 'dashboard' | 'report' | 'sync';
 export type Tag = { code: string; name: string; dimension: string; severity: Severity };
 export const tags = scheme.tags as Tag[];
 export const dimensions = scheme.dimensions;

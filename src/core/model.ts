@@ -16,7 +16,10 @@ export type Question = {
 };
 export type TagDefinition = { code: string; name: string; dimension: string; severity: Severity };
 export type TagAssignment = { code: string; severity: Severity };
+export type DimensionRating = { score: number; reason: string };
+export type DimensionRatings = Record<string, DimensionRating>;
 export type Scheme = {
+  rating?: { mode: 'tags' | 'anchors'; anchors?: Record<string, { score: number; description: string }[]> };
   id: string; name: string; version: string;
   jointReview?: import('./joint.ts').JointPolicy;
   dimensions: { id: string; name: string; weight: number; method: string }[];
@@ -46,14 +49,14 @@ export type Evaluation = {
   id: string; projectId: string; questionId: string; productId: string;
   reviewerId: string; revision: number; parentId: string | null;
   status: 'draft' | 'submitted'; mediaIds: string[]; bestMediaId: string | null;
-  mediaChecks: MediaCheck[]; tags: TagAssignment[];
+  mediaChecks: MediaCheck[]; tags: TagAssignment[]; ratings?: DimensionRatings;
   seconds: number | null; failed: boolean; failureReason: string; notes: string;
   schemeHash: string; questionsHash: string; createdAt: string;
 };
 export type Walkthrough = {
   id: string; projectId: string; productId: string;
   task: 'background' | 'color' | 'expand'; status: 'draft' | 'submitted';
-  completed: boolean; steps: number | null; tags: TagAssignment[]; notes: string;
+  completed: boolean; steps: number | null; tags: TagAssignment[]; ratings?: DimensionRatings; notes: string;
 };
 export type Experience = { productId: string; score: number | null; notes: string };
 export type ProjectBundle = {

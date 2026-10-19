@@ -1,0 +1,12 @@
+import { useId, useState } from 'react';
+import type { DimensionRatings, Scheme } from '../core/model';
+import './anchor-ratings.css';
+export default function AnchorRatings({ scheme, dimensions, values, onChange, disabled = false }: { scheme: Scheme; dimensions: string[]; values: DimensionRatings; onChange: (values: DimensionRatings) => void; disabled?: boolean }) {
+  const prefix = useId();
+  const [open, setOpen] = useState<string[]>([dimensions[0]]);
+  return <div className="anchor-ratings"><div className="anchor-intro"><strong>按维度锚点打分</strong><span>已选 {dimensions.filter(id => values[id]).length} / {dimensions.length} · 每项需填写依据</span></div>{dimensions.map(id => {
+    const value = values[id], expanded = open.includes(id);
+    const dimension = scheme.dimensions.find(row => row.id === id);
+    return <section className="anchor-dimension" key={id}><button type="button" className="anchor-heading" aria-expanded={expanded} onClick={() => setOpen(expanded ? open.filter(key => key !== id) : [...open, id])}><span className="anchor-letter">{id}</span><strong>{dimension?.name ?? id}</strong><span className={value ? 'anchor-value selected' : 'anchor-value'}>{value ? `${value.score} / 5` : '待评分'}</span><span aria-hidden="true">{expanded ? '−' : '+'}</span></button>{expanded && <fieldset disabled={disabled} className="anchor-body"><div role="radiogroup" aria-label={`${id} ${dimension?.name ?? ''}锚点评分`} className="anchor-options">{[...(scheme.rating?.anchors?.[id] ?? [])].sort((a,b) => b.score-a.score).map(anchor => <label className={`anchor-option ${value?.score === anchor.score ? 'is-selected' : ''}`} key={anchor.score}><input type="radio" name={`${prefix}-${id}`} checked={value?.score === anchor.score} onChange={() => onChange({ ...values, [id]: { score: anchor.score, reason: value?.reason ?? '' } })}/><b>{anchor.score}<small>分</small></b><span>{anchor.description}</span></label>)}</div><label className="anchor-reason">{id} 评分依据<textarea rows={2} maxLength={10000} disabled={!value || disabled} value={value?.reason ?? ''} onChange={event => onChange({ ...values, [id]: { ...value!, reason: event.target.value } })} placeholder={value ? '指出具体画面或操作证据，说明为什么选择这一档' : '先选择分数，再填写依据'}/></label>{value && <button type="button" disabled={disabled} className="anchor-clear" onClick={() => onChange(Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)))}>清除此维度评分</button>}</fieldset>}</section>;
+  })}</div>;
+}

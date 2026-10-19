@@ -1,3 +1,6 @@
+import AnchorRatings from '../components/AnchorRatings';
+import { isAnchorMode, questionDimensions } from '../core/ratings';
+import type { DimensionRatings } from '../core/model';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, Image as ImageIcon, Info, Maximize2, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import type { Asset, AssetMetadata, Evaluation, MediaCheck, ProjectBundle, TagAssignment } from '../core/model';
@@ -50,13 +53,14 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const [bestMediaId, setBestMediaId] = useState<string | null>(null);
   const [mediaChecks, setMediaChecks] = useState<MediaCheck[]>([]);
   const [selectedTags, setSelectedTags] = useState<TagAssignment[]>([]);
+  const [ratings, setRatings] = useState<DimensionRatings>({});
   const [seconds, setSeconds] = useState('');
   const [failed, setFailed] = useState(false);
   const [failureReason, setFailureReason] = useState('');
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<'draft' | 'submitted'>('draft');
   const [savedRevision, setSavedRevision] = useState<Evaluation | null>(null);
-  const [expanded, setExpanded] = useState(['A']);
+  const [expanded, setExpanded] = useState<string[]>(isAnchorMode(project.scheme) ? [] : ['A']);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -152,6 +156,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     setBestMediaId(record?.bestMediaId ?? null);
     setMediaChecks(record?.mediaChecks.map(check => ({ ...check })) ?? []);
     setSelectedTags(record?.tags.map(tag => ({ ...tag })) ?? []);
+    setRatings(structuredClone(record?.ratings ?? {}));
     setSeconds(record?.seconds == null ? '' : String(record.seconds));
     setFailed(record?.failed ?? false);
     setFailureReason(record?.failureReason ?? '');
@@ -283,6 +288,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       revision: (parent?.revision ?? 0) + 1, parentId: parent?.id ?? null,
       status: nextStatus, mediaIds: outputs.map(asset => asset.id), bestMediaId,
       mediaChecks: outputs.map(asset => mediaChecks.find(check => check.mediaId === asset.id) ?? { mediaId: asset.id, usable: null, infringement: null }),
+      ...(isAnchorMode(project.scheme) ? { ratings } : {}),
       tags: selectedTags.map(tag => ({ ...tag })), seconds: seconds.trim() === '' ? null : Number(seconds),
       failed, failureReason, notes, schemeHash: project.schemeHash, questionsHash: project.questionsHash,
       createdAt: new Date().toISOString(),
@@ -403,21 +409,22 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           <label className="formal-field"><span>被测产品</span><select value={productId} onChange={event => navigate(questionId, event.target.value)}>{project.products.map(item => <option key={item.id} value={item.id}>{item.name}{item.version ? ` · ${item.version}` : ''}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
           <label className="formal-field"><span>当前评测员 <small>本地身份</small></span><select value={reviewerId} onChange={event => { setReviewerId(event.target.value); edited(); }}><option value="">请选择评测员</option>{project.members.map(member => <option key={member.id} value={member.id}>{member.name}{product.ownerId === member.id ? ' · 产品负责人' : ''}</option>)}</select></label>
           <p className="formal-help">本地身份用于记录署名；同一产品、同一题目共同维护一条修订历史。</p>
-          <div className="formal-tag-title"><h3>最佳图问题标签</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">标签仅对应最佳图；流程故障记录在 G 维度。严重等级可在规则允许范围内调整。</p>
+          {isAnchorMode(project.scheme) && <><AnchorRatings scheme={project.scheme} dimensions={failed && !outputs.length ? ['G'] : questionDimensions} values={ratings} disabled={locked} onChange={value => { setRatings(value); edited(); }}/><p className="anchor-readonly">D 在“走查与成本”按编辑任务打分；E 根据可用率、速度和成本计算。A/B/C/F 任一评分 ≤2 时，最佳图不可标为可用。</p></>}
+          <div className="formal-tag-title"><h3>{isAnchorMode(project.scheme) ? '问题标签 · 诊断用' : '最佳图问题标签'}</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">标签仅对应最佳图；流程故障记录在 G 维度。严重等级可在规则允许范围内调整。</p>
           {reviewDimensions.map(dimension => {
             const definitions = project.scheme.tags.filter(tag => tag.dimension === dimension.id);
             const assignments = selectedTags.filter(tag => definitions.some(definition => definition.code === tag.code));
             const noOutput = failed && outputs.length === 0 && ['A', 'B', 'C', 'F'].includes(dimension.id);
-            const score = noOutput ? project.scheme.policies.failedNoOutput === 'score-one' ? 1 : null : cleanSubmitted || assignments.length ? dimensionScore(assignments.map(tag => tag.severity), true) : null;
+            const score = isAnchorMode(project.scheme) ? null : noOutput ? project.scheme.policies.failedNoOutput === 'score-one' ? 1 : null : cleanSubmitted || assignments.length ? dimensionScore(assignments.map(tag => tag.severity), true) : null;
             const open = expanded.includes(dimension.id);
-            return <div className="formal-tag-group" key={dimension.id}><button className="formal-dimension" aria-expanded={open} onClick={() => setExpanded(previous => open ? previous.filter(id => id !== dimension.id) : [...previous, dimension.id])}><span className="formal-dimension-letter">{dimension.id}</span><strong>{dimension.name}</strong><span className="formal-score">{score == null ? '—' : `${score}.0`}<small>{score != null ? cleanSubmitted ? '/ 5' : '预览' : ''}</small></span><ChevronRight size={13} className={open ? 'open' : ''} /></button>
+            return <div className="formal-tag-group" key={dimension.id}><button className="formal-dimension" aria-expanded={open} onClick={() => setExpanded(previous => open ? previous.filter(id => id !== dimension.id) : [...previous, dimension.id])}><span className="formal-dimension-letter">{dimension.id}</span><strong>{dimension.name}</strong>{!isAnchorMode(project.scheme) && <span className="formal-score">{score == null ? '—' : `${score}.0`}<small>{score != null ? cleanSubmitted ? '/ 5' : '预览' : ''}</small></span>}<ChevronRight size={13} className={open ? 'open' : ''} /></button>
               {open && <div className="formal-tag-options">{definitions.map(definition => {
                 const selected = selectedTags.find(tag => tag.code === definition.code);
                 return <div className={`formal-tag-option ${selected ? 'checked' : ''}`} key={definition.code}><button aria-pressed={!!selected} onClick={() => toggleTag(definition.code, definition.severity)}><span className="formal-checkbox">{selected && <Check size={11} />}</span><span><small>{definition.code}</small>{definition.name}</span></button>{selected ? <select aria-label={`${definition.code} 严重等级`} value={selected.severity} onChange={event => { setSelectedTags(previous => previous.map(tag => tag.code === definition.code ? { ...tag, severity: event.target.value as Severity } : tag)); edited(); }}>{allowedSeverities(definition).map(severity => <option key={severity} value={severity}>{severity}</option>)}</select> : <span className={`formal-severity severity-${definition.severity.toLowerCase()}`}>{definition.severity}</span>}</div>;
               })}{!definitions.length && <p className="formal-help">此维度未配置问题标签。</p>}</div>}
             </div>;
           })}
-          <div className="formal-score-note"><Info size={13} /><span>草稿的空维度显示 —；正式提交后，无问题标签计 5 分。F、G 完整维度分还需结合逐图检查与走查记录。{failed && !outputs.length && <> 当前失败无输出：{project.scheme.policies.failedNoOutput === 'score-one' ? 'A / B / C / F 按已确认规则记 1 分。' : project.scheme.policies.failedNoOutput === 'exclude' ? 'A / B / C / F 按规则排除。' : '评分口径尚未确认。'}</>}</span></div>
+          <div className="formal-score-note"><Info size={13} /><span>{isAnchorMode(project.scheme) ? '当前为锚点直评分；以下问题标签仅作诊断与风险检查，不换算分数。' : '草稿的空维度显示 —；正式提交后，无问题标签计 5 分。'}F、G 完整维度分还需结合逐图检查与走查记录。{failed && !outputs.length && <> 当前失败无输出：{project.scheme.policies.failedNoOutput === 'score-one' ? 'A / B / C / F 按已确认规则记 1 分。' : project.scheme.policies.failedNoOutput === 'exclude' ? 'A / B / C / F 按规则排除。' : '评分口径尚未确认。'}</>}</span></div>
           {selectedTags.some(tag => ['A03', 'B01'].includes(normalizeCode(tag.code))) && <p className="formal-warning-text">若涉及价格等关键信息错误或商品品类错误，请按规则将相应标签调整为 P0，并在备注中记录具体证据。</p>}
           <div className="formal-metrics-title"><Clock3 size={15} /><h3>生成记录</h3></div>
           <div className="formal-metrics"><label className="formal-field"><span>耗时 / 秒</span><input type="number" min="0" step="any" value={seconds} placeholder="待填写" onChange={event => { setSeconds(event.target.value); edited(); }} /></label><div><span>总张数</span><strong>{outputs.length}</strong></div><div><span>可用张数</span><strong>{outputs.length && mediaChecks.every(check => check.usable != null) ? usableCount : '—'}</strong></div></div>

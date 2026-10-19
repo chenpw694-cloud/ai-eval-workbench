@@ -4,42 +4,355 @@
   "name": "电商文生图产品评测方案",
   "version": "0.1.0-preview",
   "dataSource": "demo",
-  "jointReview": { "scenes": ["白底主图", "场景图", "详情图", "营销海报"], "perScene": 3, "minimumQuestions": 50 },
-  "scoring": { "mode": "highest-severity-per-dimension", "none": 5, "P3": 4, "P2": 3, "P1": 2, "P0": 1 },
+  "jointReview": {
+    "scenes": [
+      "白底主图",
+      "场景图",
+      "详情图",
+      "营销海报"
+    ],
+    "perScene": 3,
+    "minimumQuestions": 50
+  },
+  "scoring": {
+    "mode": "highest-severity-per-dimension",
+    "none": 5,
+    "P3": 4,
+    "P2": 3,
+    "P1": 2,
+    "P0": 1
+  },
   "dimensions": [
-    { "id": "A", "name": "电商场景适配", "weight": 20, "method": "逐题标签" },
-    { "id": "B", "name": "指令理解与遵循", "weight": 15, "method": "逐题标签" },
-    { "id": "C", "name": "画面质量", "weight": 20, "method": "逐题标签" },
-    { "id": "D", "name": "可控性与编辑", "weight": 10, "method": "固定任务走查" },
-    { "id": "E", "name": "效率与成本", "weight": 10, "method": "量化指标" },
-    { "id": "F", "name": "合规与安全", "weight": 5, "method": "逐题标签 + 产品检查" },
-    { "id": "G", "name": "产品体验", "weight": 20, "method": "逐题标签 + 走查" }
+    {
+      "id": "A",
+      "name": "电商场景适配",
+      "weight": 20,
+      "method": "逐题标签"
+    },
+    {
+      "id": "B",
+      "name": "指令理解与遵循",
+      "weight": 15,
+      "method": "逐题标签"
+    },
+    {
+      "id": "C",
+      "name": "画面质量",
+      "weight": 20,
+      "method": "逐题标签"
+    },
+    {
+      "id": "D",
+      "name": "可控性与编辑",
+      "weight": 10,
+      "method": "固定任务走查"
+    },
+    {
+      "id": "E",
+      "name": "效率与成本",
+      "weight": 10,
+      "method": "量化指标"
+    },
+    {
+      "id": "F",
+      "name": "合规与安全",
+      "weight": 5,
+      "method": "逐题标签 + 产品检查"
+    },
+    {
+      "id": "G",
+      "name": "产品体验",
+      "weight": 20,
+      "method": "逐题标签 + 走查"
+    }
   ],
   "tags": [
-    { "code": "A-01", "name": "商品还原错误", "dimension": "A", "severity": "P1" },
-    { "code": "A-02", "name": "颜色偏差", "dimension": "A", "severity": "P1" },
-    { "code": "A-03", "name": "文字信息错误", "dimension": "A", "severity": "P1" },
-    { "code": "A-04", "name": "文字不可读 / 版面混乱", "dimension": "A", "severity": "P2" },
-    { "code": "A-05", "name": "上架规范不符", "dimension": "A", "severity": "P2" },
-    { "code": "A-06", "name": "抠图感 / 悬浮感", "dimension": "A", "severity": "P2" },
-    { "code": "A-07", "name": "细节不清", "dimension": "A", "severity": "P2" },
-    { "code": "A-08", "name": "卖点表达错误", "dimension": "A", "severity": "P1" },
-    { "code": "B-01", "name": "主体错误", "dimension": "B", "severity": "P1" },
-    { "code": "B-02", "name": "属性串色", "dimension": "B", "severity": "P1" },
-    { "code": "B-03", "name": "元素遗漏 / 多余", "dimension": "B", "severity": "P2" },
-    { "code": "B-04", "name": "场景 / 风格不符", "dimension": "B", "severity": "P2" },
-    { "code": "B-05", "name": "构图 / 视角不符", "dimension": "B", "severity": "P2" },
-    { "code": "C-01", "name": "真实感不足", "dimension": "C", "severity": "P2" },
-    { "code": "C-02", "name": "结构畸形", "dimension": "C", "severity": "P1" },
-    { "code": "C-03", "name": "清晰度不足", "dimension": "C", "severity": "P2" },
-    { "code": "C-04", "name": "缺乏商业美感", "dimension": "C", "severity": "P2" },
-    { "code": "D-01", "name": "修改破坏原图", "dimension": "D", "severity": "P1" },
-    { "code": "D-02", "name": "修改未达成", "dimension": "D", "severity": "P2" },
-    { "code": "F-01", "name": "侵权元素", "dimension": "F", "severity": "P0" },
-    { "code": "F-02", "name": "过度美化", "dimension": "F", "severity": "P1" },
-    { "code": "G-01", "name": "操作不便", "dimension": "G", "severity": "P2" },
-    { "code": "G-02", "name": "提示词改写偏离", "dimension": "G", "severity": "P1" },
-    { "code": "G-03", "name": "审核误拦截", "dimension": "G", "severity": "P1" },
-    { "code": "G-04", "name": "卡顿 / 中断", "dimension": "G", "severity": "P1" }
-  ]
+    {
+      "code": "A-01",
+      "name": "商品还原错误",
+      "dimension": "A",
+      "severity": "P1"
+    },
+    {
+      "code": "A-02",
+      "name": "颜色偏差",
+      "dimension": "A",
+      "severity": "P1"
+    },
+    {
+      "code": "A-03",
+      "name": "文字信息错误",
+      "dimension": "A",
+      "severity": "P1"
+    },
+    {
+      "code": "A-04",
+      "name": "文字不可读 / 版面混乱",
+      "dimension": "A",
+      "severity": "P2"
+    },
+    {
+      "code": "A-05",
+      "name": "上架规范不符",
+      "dimension": "A",
+      "severity": "P2"
+    },
+    {
+      "code": "A-06",
+      "name": "抠图感 / 悬浮感",
+      "dimension": "A",
+      "severity": "P2"
+    },
+    {
+      "code": "A-07",
+      "name": "细节不清",
+      "dimension": "A",
+      "severity": "P2"
+    },
+    {
+      "code": "A-08",
+      "name": "卖点表达错误",
+      "dimension": "A",
+      "severity": "P1"
+    },
+    {
+      "code": "B-01",
+      "name": "主体错误",
+      "dimension": "B",
+      "severity": "P1"
+    },
+    {
+      "code": "B-02",
+      "name": "属性串色",
+      "dimension": "B",
+      "severity": "P1"
+    },
+    {
+      "code": "B-03",
+      "name": "元素遗漏 / 多余",
+      "dimension": "B",
+      "severity": "P2"
+    },
+    {
+      "code": "B-04",
+      "name": "场景 / 风格不符",
+      "dimension": "B",
+      "severity": "P2"
+    },
+    {
+      "code": "B-05",
+      "name": "构图 / 视角不符",
+      "dimension": "B",
+      "severity": "P2"
+    },
+    {
+      "code": "C-01",
+      "name": "真实感不足",
+      "dimension": "C",
+      "severity": "P2"
+    },
+    {
+      "code": "C-02",
+      "name": "结构畸形",
+      "dimension": "C",
+      "severity": "P1"
+    },
+    {
+      "code": "C-03",
+      "name": "清晰度不足",
+      "dimension": "C",
+      "severity": "P2"
+    },
+    {
+      "code": "C-04",
+      "name": "缺乏商业美感",
+      "dimension": "C",
+      "severity": "P2"
+    },
+    {
+      "code": "D-01",
+      "name": "修改破坏原图",
+      "dimension": "D",
+      "severity": "P1"
+    },
+    {
+      "code": "D-02",
+      "name": "修改未达成",
+      "dimension": "D",
+      "severity": "P2"
+    },
+    {
+      "code": "F-01",
+      "name": "侵权元素",
+      "dimension": "F",
+      "severity": "P0"
+    },
+    {
+      "code": "F-02",
+      "name": "过度美化",
+      "dimension": "F",
+      "severity": "P1"
+    },
+    {
+      "code": "G-01",
+      "name": "操作不便",
+      "dimension": "G",
+      "severity": "P2"
+    },
+    {
+      "code": "G-02",
+      "name": "提示词改写偏离",
+      "dimension": "G",
+      "severity": "P1"
+    },
+    {
+      "code": "G-03",
+      "name": "审核误拦截",
+      "dimension": "G",
+      "severity": "P1"
+    },
+    {
+      "code": "G-04",
+      "name": "卡顿 / 中断",
+      "dimension": "G",
+      "severity": "P1"
+    }
+  ],
+  "rating": {
+    "mode": "tags",
+    "anchors": {
+      "A": [
+        {
+          "score": 1,
+          "description": "商品、卖点或上架要求严重错误，无法使用"
+        },
+        {
+          "score": 2,
+          "description": "商品关键信息明显偏差，仅能参考，需重新生成"
+        },
+        {
+          "score": 3,
+          "description": "基本符合电商场景，需较大修改后使用"
+        },
+        {
+          "score": 4,
+          "description": "商品与卖点准确，微调排版或细节即可使用"
+        },
+        {
+          "score": 5,
+          "description": "商品、卖点、版式和上架要求均满足，可直接使用"
+        }
+      ],
+      "B": [
+        {
+          "score": 1,
+          "description": "未理解核心需求，主体或任务错误"
+        },
+        {
+          "score": 2,
+          "description": "关键指令未遵循，需重新生成"
+        },
+        {
+          "score": 3,
+          "description": "主要意图正确，重要元素或约束需较大调整"
+        },
+        {
+          "score": 4,
+          "description": "核心指令均遵循，少量细节需微调"
+        },
+        {
+          "score": 5,
+          "description": "主体、属性、场景、风格和构图均准确遵循"
+        }
+      ],
+      "C": [
+        {
+          "score": 1,
+          "description": "明显畸形、模糊或不真实，无法使用"
+        },
+        {
+          "score": 2,
+          "description": "结构或质感问题严重，仅能参考"
+        },
+        {
+          "score": 3,
+          "description": "基本成图，真实感、清晰度或美感需较大修改"
+        },
+        {
+          "score": 4,
+          "description": "画面质量良好，仅有轻微瑕疵"
+        },
+        {
+          "score": 5,
+          "description": "结构、细节、光影与商业美感俱佳，可直接使用"
+        }
+      ],
+      "D": [
+        {
+          "score": 1,
+          "description": "无法完成编辑目标"
+        },
+        {
+          "score": 2,
+          "description": "编辑困难，或严重破坏原图，需重新生成"
+        },
+        {
+          "score": 3,
+          "description": "部分达成编辑目标，需要较大修正"
+        },
+        {
+          "score": 4,
+          "description": "编辑目标基本达成，仅需微调且主体保持完整"
+        },
+        {
+          "score": 5,
+          "description": "准确完成编辑，其他内容稳定保留"
+        }
+      ],
+      "F": [
+        {
+          "score": 1,
+          "description": "发现侵权或其他严重风险，不可使用"
+        },
+        {
+          "score": 2,
+          "description": "存在明显误导或合规问题，需重新生成"
+        },
+        {
+          "score": 3,
+          "description": "存在待核实风险，需较大修改后再审查"
+        },
+        {
+          "score": 4,
+          "description": "未见重大风险，轻微表达需修正"
+        },
+        {
+          "score": 5,
+          "description": "按本题检查要点未发现风险；仍需单独检查商用授权"
+        }
+      ],
+      "G": [
+        {
+          "score": 1,
+          "description": "本次操作无法完成"
+        },
+        {
+          "score": 2,
+          "description": "操作困难或中断，勉强完成"
+        },
+        {
+          "score": 3,
+          "description": "需要摸索或重复操作，流程需明显改善"
+        },
+        {
+          "score": 4,
+          "description": "有少量不便，不影响完成本次任务"
+        },
+        {
+          "score": 5,
+          "description": "本次操作顺畅，反馈清晰，无需摸索"
+        }
+      ]
+    }
+  }
 }

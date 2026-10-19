@@ -1,3 +1,5 @@
+import { defaultAnchors, isAnchorMode, ratedDimensions } from '../core/ratings';
+import '../components/anchor-ratings.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import {
@@ -552,17 +554,22 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
 
     {tab === 'rules' && <>
       <section className="panel setup-section">
-        <PanelHeading title="维度与权重" subtitle="每个维度分别按最高问题等级换算为 1–5 分，再按权重汇总；无标签仅在已提交后记为 5 分。" action={<Pill tone={weightsValid ? 'green' : 'red'}>合计 {weightTotal.toFixed(Number.isInteger(weightTotal) ? 0 : 1)}%</Pill>} />
+        <PanelHeading title="维度与权重" subtitle={isAnchorMode(draft.scheme) ? '按配置锚点打 1～5 分，再按维度权重汇总；未评分不计为满分。E 保持实际指标计算。' : '每个维度分别按最高问题等级换算为 1–5 分，再按权重汇总；无标签仅在已提交后记为 5 分。'} action={<Pill tone={weightsValid ? 'green' : 'red'}>合计 {weightTotal.toFixed(Number.isInteger(weightTotal) ? 0 : 1)}%</Pill>} />
         <div className="setup-table-scroll"><table className="setup-table setup-weight-table"><thead><tr><th>评测维度</th><th>采集方式</th><th>权重</th></tr></thead><tbody>
-          {draft.scheme.dimensions.map((dimension, index) => <tr key={dimension.id}><td><span className="setup-dimension-id">{dimension.id}</span><strong>{dimension.name}</strong>{dimension.id === 'F' && <Pill tone="orange">含一票否决</Pill>}</td><td>{dimension.method}</td><td><label className="setup-weight-control"><input type="number" min={0} max={100} step={1} value={dimension.weight} aria-label={`${dimension.name}权重`} disabled={locked || saving} onChange={event => setDraft(previous => ({ ...previous, rulesConfirmed: false, scheme: { ...previous.scheme, dimensions: previous.scheme.dimensions.map((item, itemIndex) => itemIndex === index ? { ...item, weight: Number(event.target.value) } : item) } }))} /><span>%</span></label></td></tr>)}
+          {draft.scheme.dimensions.map((dimension, index) => <tr key={dimension.id}><td><span className="setup-dimension-id">{dimension.id}</span><strong>{dimension.name}</strong>{dimension.id === 'F' && <Pill tone="orange">含一票否决</Pill>}</td><td>{isAnchorMode(draft.scheme) && dimension.id !== 'E' ? dimension.id === 'D' ? '编辑任务锚点直评分' : dimension.id === 'G' ? '逐题锚点 + 整体体验' : '逐题锚点直评分' : dimension.method}</td><td><label className="setup-weight-control"><input type="number" min={0} max={100} step={1} value={dimension.weight} aria-label={`${dimension.name}权重`} disabled={locked || saving} onChange={event => setDraft(previous => ({ ...previous, rulesConfirmed: false, scheme: { ...previous.scheme, dimensions: previous.scheme.dimensions.map((item, itemIndex) => itemIndex === index ? { ...item, weight: Number(event.target.value) } : item) } }))} /><span>%</span></label></td></tr>)}
         </tbody></table></div>
         {!weightsValid && <div className="setup-inner-notice"><Notice tone="warning">请将所有权重调整到 0–100% 范围，合计恰好为 100%，然后保存。</Notice></div>}
       </section>
 
+      <section className="panel anchor-config"><PanelHeading title="评分方式与锚点" subtitle="选择本项目采用的评分口径；改动后需重新确认规则。开始评测或分发后锁定。"/>
+        <label>评分方式<select aria-label="评分方式" disabled={locked || saving} value={draft.scheme.rating?.mode ?? 'tags'} onChange={event => setDraft(previous => ({ ...previous, rulesConfirmed: false, scheme: { ...previous.scheme, rating: { mode: event.target.value as 'tags' | 'anchors', anchors: previous.scheme.rating?.anchors ?? defaultAnchors() } } }))}><option value="tags">标签自动换算（原课程规则）</option><option value="anchors">锚点直评分（扩展口径）</option></select></label>
+        <p>{isAnchorMode(draft.scheme) ? 'A/B/C/F/G 逐题按锚点选分并写依据；D 在三个编辑任务中打分；E 仍由实际数据计算。标签保留作诊断与合规检查。以下为建议锚点，可在开始前编辑，不是原课程的标签换算规则。' : '由该维度最严重的问题标签换算得分。若需要逐维度直接选 1–5 分，请切换为锚点直评分。'}</p>
+        {isAnchorMode(draft.scheme) && ratedDimensions.map(id => <details key={id}><summary>{id} · {draft.scheme.dimensions.find(row => row.id === id)?.name} · 1–5 分锚点</summary>{(draft.scheme.rating?.anchors?.[id] ?? []).map(anchor => <label key={anchor.score} className="anchor-config-row"><span>{anchor.score} 分</span><textarea rows={2} maxLength={2000} aria-label={`${id}维度${anchor.score}分锚点`} disabled={locked || saving} value={anchor.description} onChange={event => setDraft(previous => ({ ...previous, rulesConfirmed: false, scheme: { ...previous.scheme, rating: { ...previous.scheme.rating!, anchors: { ...previous.scheme.rating!.anchors, [id]: previous.scheme.rating!.anchors![id].map(row => row.score === anchor.score ? { ...row, description: event.target.value } : row) } } } }))}/></label>)}</details>)}
+      </section>
       <section className="panel setup-section">
         <PanelHeading title="评分边界政策" subtitle="原规则中没有明确的情形，必须由项目决定；允许暂留缺口，但不会用默认值补出完整总分。" />
         <div className="setup-policies">
-          <label className="setup-policy"><span><strong>生成失败且没有输出图片</strong><small>涉及 A / B / C / F 图像维度；G 仍按失败过程标签评分。选择排除时，全无图的产品仍没有效果均分和总分。</small></span><select value={draft.scheme.policies.failedNoOutput} disabled={locked || saving} onChange={event => changePolicy('failedNoOutput', event.target.value as Scheme['policies']['failedNoOutput'])}><option value="unresolved">待确认：保留相关得分缺口</option><option value="score-one">无图的图像维度均记 1 分</option><option value="exclude">从效果均分排除，保留失败与可用率统计</option></select></label>
+          <label className="setup-policy"><span><strong>生成失败且没有输出图片</strong><small>涉及 A / B / C / F 图像维度；G 仍按本次失败过程评分。选择排除时，全无图的产品仍没有效果均分和总分。</small></span><select value={draft.scheme.policies.failedNoOutput} disabled={locked || saving} onChange={event => changePolicy('failedNoOutput', event.target.value as Scheme['policies']['failedNoOutput'])}><option value="unresolved">待确认：保留相关得分缺口</option><option value="score-one">无图的图像维度均记 1 分</option><option value="exclude">从效果均分排除，保留失败与可用率统计</option></select></label>
           <label className="setup-policy"><span><strong>速度或成本排名出现并列</strong><small>密集排名将并列产品记为相同名次，下一名依次递进，例如 1、1、2，对应 5、5、4 分。</small></span><select value={draft.scheme.policies.rankingTies} disabled={locked || saving} onChange={event => changePolicy('rankingTies', event.target.value as Scheme['policies']['rankingTies'])}><option value="unresolved">待确认：并列排名保留缺口</option><option value="dense">采用密集排名</option></select></label>
           <label className="setup-policy"><span><strong>可用张数为零时的单张成本</strong><small>不能除以零。记 1 分仅作用于 E 维度的“成本子分”，不将整个 E 维度直接记为 1 分。</small></span><select value={draft.scheme.policies.zeroUsableCost} disabled={locked || saving} onChange={event => changePolicy('zeroUsableCost', event.target.value as Scheme['policies']['zeroUsableCost'])}><option value="unresolved">待确认：成本子分保留缺口</option><option value="score-one">成本子分记为 1 分</option></select></label>
         </div>
@@ -577,7 +584,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
 
       <section className={`panel setup-rule-confirmation ${draft.rulesConfirmed ? 'confirmed' : ''}`}>
         <span className="setup-confirm-icon"><ShieldCheck size={22} /></span>
-        <div><h3>确认采用本次规则快照</h3><p>保存后，正式提交使用此项目中的规则快照；修改权重或边界政策会取消确认。此操作不会改写仓库中的 scheme.json。</p><label><input type="checkbox" checked={draft.rulesConfirmed} disabled={locked || saving || !weightsValid} onChange={event => updateProject('rulesConfirmed', event.target.checked)} /><span>我已阅读并确认本项目采用以上规则{unresolvedCount ? '，知晓未明确政策会保留计算缺口' : ''}。</span></label></div>
+        <div><h3>确认采用本次规则快照</h3><p>保存后，正式提交使用此项目中的规则快照；修改评分方式、锚点、权重或边界政策会取消确认。此操作不会改写仓库中的 scheme.json。</p><label><input type="checkbox" checked={draft.rulesConfirmed} disabled={locked || saving || !weightsValid} onChange={event => updateProject('rulesConfirmed', event.target.checked)} /><span>我已阅读并确认本项目采用以上规则{unresolvedCount ? '，知晓未明确政策会保留计算缺口' : ''}。</span></label></div>
         <Pill tone={draft.rulesConfirmed ? 'green' : 'orange'}>{draft.rulesConfirmed ? '已勾选确认' : '未确认'}</Pill>
       </section>
       <div className="setup-footer"><span><LockKeyhole size={13} />分发或开始评测后锁定快照，未确认规则不能正式评测。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '规则快照及确认状态已保存')}><Save size={14} />保存规则快照</button></div>

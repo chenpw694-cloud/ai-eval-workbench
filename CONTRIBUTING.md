@@ -16,6 +16,7 @@ pnpm dev
 | 电商方案、权重与标签 | `schemes/ecommerce-t2i/scheme.json` |
 | 正式页面与操作流程 | `src/pages/FormalWorkspace.tsx` 与对应 Workspace 页面 |
 | 演示页面与合成数据 | `src/App.tsx`、`src/demo/`、`src/pages/ReportDemo.tsx` |
+| 锚点与直接评分 | `src/core/ratings.ts`、`src/components/AnchorRatings.tsx`、`docs/14-anchor-scoring.md` |
 | 评分、汇总与口径 | `src/core/assessment.ts`、`scoring.ts`、`report.ts` |
 | 传包、合并与冲突 | `src/core/packages.ts`、`merge.ts`、`src/storage/` |
 | 独立复评与 GSB | `src/core/quality.ts`、`src/storage/quality.ts` |

@@ -1,3 +1,4 @@
+import { defaultAnchors } from '../src/core/ratings.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -11,9 +12,10 @@ const stamp='2026-10-20T12:00:00.000Z';let seq=0;const id=()=>`a-${++seq}`;
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=','base64');
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(',')}]`:value&&typeof value==='object'?`{${Object.keys(value).sort().map(k=>`${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`:JSON.stringify(value);
-function setup(complete=false){
+function setup(complete=false,anchors=false){
  const b=fixture(3,complete?50:2);b.quality=emptyQuality();b.project.scheme.policies.rankingTies='dense';
  b.project.questions.forEach((q,i)=>{q.scene=['白底主图','场景图','详情图','营销海报'][i%4];});
+ if(anchors){b.project.scheme.rating={mode:'anchors',anchors:defaultAnchors()};b.evaluations.forEach(r=>r.ratings=Object.fromEntries(['A','B','C','F','G'].map(id=>[id,{score:5,reason:'合成评分依据'}])));b.walkthroughs.forEach(r=>r.ratings={D:{score:5,reason:'编辑目标达成'}});}
  b.project.schemeHash=sha(canonical(b.project.scheme));b.project.questionsHash=sha(canonical(b.project.questions));
  b.evaluations.forEach(e=>{e.schemeHash=b.project.schemeHash;e.questionsHash=b.project.questionsHash;});b.assets.forEach(a=>{a.size=png.length;a.sha256=sha(png);});
  if(complete){
@@ -24,6 +26,7 @@ function setup(complete=false){
   b.quality.joint=createJointPlan(b,ids,'共同选题，覆盖场景',id(),stamp);b.quality.joint.rankings=ids.map(questionId=>({id:id(),parentId:null,questionId,participants:['m1','m2','m3'],ranks:b.project.products.map((p,i)=>({productId:p.id,rank:i+1})),unable:false,reason:'共同确认名次',createdAt:stamp}));
   b.quality.reportNotes=[{...emptyReportNotes(),id:id(),parentId:null,createdAt:stamp,participants:['m1','m2','m3'],summary:'基于本轮真实范围的结论',productInsights:'各产品的优势和短板',recommendations:'自家产品启示',consistencyExplanation:'维度与联合比较的关系',featureComparison:'功能、价格与商用条款依据',limitations:'样本、人员、版本与随机性',caseQuestionIds:ids.slice(0,3)}];
  }
+ if(anchors){for(const row of [...b.quality.judgments,...b.quality.decisions])row.ratings=Object.fromEntries(['A','B','C','F'].map(id=>[id,{score:5,reason:'独立或共同判断依据'}]));}
  return {bundle:b,snapshots:[b.project],audits:[]};
 }
 const input=(patch={})=>({mode:'checkpoint',basis:'original',operatorId:'m1',reason:'留存本轮评测证据',scopeConfirmed:true,featuresConfirmed:true,conclusionsConfirmed:true,demo:false,...patch});
@@ -55,3 +58,5 @@ test('all assigned quality judgments must be valid, and duplicate review sample 
 test('operator must belong to the project and independent spaces cannot archive full data',async()=>{const source=setup();await assert.rejects(()=>build(source,{operatorId:'stranger'}),/负责人/);source.bundle.quality.space={type:'blind',batchId:'x',reviewerId:'m1'};await assert.rejects(()=>build(source),/独立评审/);});
 test('manifest digest itself is verifiable independently of JSON key order',async()=>{const record=await build(setup());const {manifestHash,...unsigned}=record.manifest;assert.equal(manifestHash,sha(canonical(unsigned)));const filesReordered=files(record).reverse();const read=await readFinalArchive(filesReordered);assert.equal(read.record.id,record.id);});
 test('unprepared configuration uses regular draft backup rather than an unmergeable archive',async()=>{const source=setup();source.bundle.project.rulesConfirmed=false;await assert.rejects(()=>build(source),/配置草稿可使用项目备份/);});
+
+test('complete anchor workflow creates a final archive without changing legacy archive semantics',async()=>{const source=setup(true,true);assert.deepEqual(archiveReadiness(source.bundle,'original',stamp,input(),true).blockers,[]);const record=await build(source,{mode:'final'});assert.equal(record.manifest.calculationVersion,'ecommerce-anchors-v1');const read=await readFinalArchive(files(record));assert.equal(read.report.status,'final');assert.equal(read.bundle.evaluations[0].ratings.A.score,5);assert.match(await record.files.find(f=>f.name.endsWith('.report.md')).blob.text(),/总分 \/5/);});

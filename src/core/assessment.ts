@@ -1,3 +1,4 @@
+import { isAnchorMode, questionDimensions, imageRatingDimensions, ratingErrors, ratingSchemeErrors, recordDimensionScore } from './ratings.ts';
 import { dimensionScore, type Severity } from './scoring.ts';
 import type {
   AssetMetadata, DimensionId, Evaluation, Metric, Product, ProductResult,
@@ -105,6 +106,9 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
   if (!record.questionsHash || record.questionsHash !== project.questionsHash) errors.push('题库快照不匹配');
   if (record.seconds === null || !Number.isFinite(record.seconds) || record.seconds < 0) errors.push('生成耗时须为大于或等于 0 的有限秒数');
   errors.push(...tagErrors(project, record.tags, ['A', 'B', 'C', 'F', 'G']));
+  const ratingDims = record.failed && !record.mediaIds.length ? ['G'] : questionDimensions;
+  errors.push(...ratingErrors(project.scheme, record.ratings, questionDimensions, false));
+  if (isAnchorMode(project.scheme)) errors.push(...ratingErrors(project.scheme, record.ratings && Object.fromEntries(Object.entries(record.ratings).filter(([id]) => ratingDims.includes(id))), ratingDims, true));
   if (record.failed && !filled(record.failureReason)) errors.push('生成失败必须填写失败原因');
   if (record.failed && !record.tags.some(tag => tag.code === 'G-03' || tag.code === 'G-04')) errors.push('生成失败需记录 G-03 或 G-04 标签');
   if (!record.failed && record.mediaIds.length === 0) errors.push('非失败任务必须有原始输出图片');
@@ -132,7 +136,7 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
         const definition = project.scheme.tags.find(tag => tag.code === assignment.code);
         return definition && imageDimensions.includes(definition.dimension as DimensionId) && ['P0', 'P1'].includes(assignment.severity);
       });
-      if (seriousImageTag && check?.usable === true) errors.push('最佳图存在 P0/P1 问题，不可标记为可用');
+      if ((seriousImageTag || (isAnchorMode(project.scheme) && imageRatingDimensions.some(id => (record.ratings?.[id]?.score ?? 5) <= 2))) && check?.usable === true) errors.push('最佳图存在 P0/P1 问题，不可标记为可用');
       const hasInfringementTag = record.tags.some(tag => tag.code === 'F-01');
       if (check && typeof check.infringement === 'boolean' && hasInfringementTag !== check.infringement) errors.push('最佳图 F-01 标签与逐图侵权检查不一致');
     }
@@ -168,6 +172,7 @@ export function validateProject(project: Project): string[] {
     if (!question.acceptance.length || question.acceptance.some(item => !filled(item))) errors.push(`题目 ${question.id} 至少需要一条有效验收要点`);
   }
   if (!filled(project.scheme.version)) errors.push('规则版本不可为空');
+  errors.push(...ratingSchemeErrors(project.scheme));
   const definitions = project.scheme.dimensions;
   if (definitions.length !== 7 || dimensionIds.some(id => definitions.filter(dimension => dimension.id === id).length !== 1)) errors.push('需配置且只配置 A–G 七个一级维度');
   if (definitions.some(dimension => !Number.isFinite(dimension.weight) || dimension.weight < 0) || Math.abs(definitions.reduce((sum, dimension) => sum + dimension.weight, 0) - 100) > 1e-8) errors.push('维度权重必须为非负有限数且总和为 100%');
@@ -192,6 +197,7 @@ function scoreTags(project: Project, assignments: TagAssignment[], dimension: Di
 function walkthroughError(project: Project, walkthrough: Walkthrough): string[] {
   const reasons = tagErrors(project, walkthrough.tags, ['D']);
   if (walkthrough.steps === null || !Number.isSafeInteger(walkthrough.steps) || walkthrough.steps < 0) reasons.push('操作步数未完整记录');
+  reasons.push(...ratingErrors(project.scheme, walkthrough.ratings, ['D'], isAnchorMode(project.scheme)));
   if (!walkthrough.completed && !walkthrough.tags.length) reasons.push('未完成的走查必须记录对应 D 标签');
   return reasons;
 }
@@ -268,7 +274,7 @@ export function summarizeProject(bundle: ProjectBundle): ProductResult[] {
           if (project.scheme.policies.failedNoOutput === 'exclude') { excluded++; continue; }
           if (project.scheme.policies.failedNoOutput === 'score-one') values.push(1);
           else reasons.push(`题目 ${record.questionId} 失败且零输出，图像计分规则待确认`);
-        } else values.push(scoreTags(project, record.tags, id));
+        } else { const value = recordDimensionScore(project.scheme, record, id); if (value !== null) values.push(value); }
       }
       if (excluded) reasons.push(`已明确排除 ${excluded} 道失败零输出题，有效分母为 ${expected - excluded}`);
       if (!values.length) reasons.push('没有可计算图像维度均分的有效题目');
@@ -282,14 +288,14 @@ export function summarizeProject(bundle: ProjectBundle): ProductResult[] {
       if (walks.length !== 1 || walks[0].status !== 'submitted') { dReasons.push(`走查 ${task} 未提交或存在重复记录`); continue; }
       const errors = walkthroughError(project, walks[0]);
       if (errors.length) dReasons.push(...errors.map(error => `走查 ${task}：${error}`));
-      else dValues.push(scoreTags(project, walks[0].tags, 'D'));
+      else { const value = recordDimensionScore(project.scheme, walks[0], 'D'); if (value !== null) dValues.push(value); }
     }
     dimensions.D = metric(dValues, 3, dReasons);
 
     const experience = bundle.experiences.filter(item => item.productId === product.id);
     const experienceScore = experience.length === 1 ? experience[0].score : null;
     const validExperience = experienceScore !== null && Number.isFinite(experienceScore) && experienceScore >= 1 && experienceScore <= 5;
-    const gValues = valid.map(record => scoreTags(project, record.tags, 'G'));
+    const gValues = valid.flatMap(record => { const value = recordDimensionScore(project.scheme, record, 'G'); return value === null ? [] : [value]; });
     const gMean = average(gValues);
     dimensions.G = { value: gMean !== null && validExperience ? (gMean + experienceScore!) / 2 : null, complete: expected > 0 && valid.length === expected && validExperience, n: valid.length, expected, reasons: unique([...missing, ...(validExperience ? [] : ['缺少唯一有效的整体走查体验分（1–5）'])]) };
 

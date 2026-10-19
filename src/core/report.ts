@@ -1,6 +1,7 @@
+import { isAnchorMode, recordDimensionScore } from './ratings.ts';
 import type { DimensionId, ProjectBundle } from './model.ts';
 import { latestEvaluations, summarizeProject, validateEvaluation, validateProject } from './assessment.ts';
-import { disagreement, finalQualityBundle, latestQuality, qualitySummary, validateQuality } from './quality.ts';
+import { judgmentDisagreement, finalQualityBundle, latestQuality, qualitySummary, validateQuality } from './quality.ts';
 import { jointSummary, latestRankings } from './joint.ts';
 import { latestReportNotes } from './report-notes.ts';
 
@@ -42,7 +43,7 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
   const decisions = latestQuality(state?.decisions ?? [], row => row.taskId);
   const missingFinals = tasks.filter(task => ['review','recheck'].includes(task.kind)).filter(task => {
     const judgment = judgments.find(row => row.taskId === task.id), original = bundle.evaluations.find(row => row.id === task.evidence[0]?.baselineId);
-    if (!judgment || judgment.unable || !original || !disagreement(original.tags, judgment.tags, bundle)) return false;
+    if (!judgment || judgment.unable || !original || !judgmentDisagreement(original, judgment, bundle)) return false;
     const decision = decisions.find(row => row.taskId === task.id && row.judgmentId === judgment.id);
     return !decision || !state?.finals?.some(ref => ref.baselineId === original.id && ref.decisionId === decision.id);
   });
@@ -71,7 +72,7 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
     const expected = bundle.project.questions.filter(q => q[field] === value).length;
     const rows = valid.filter(r => r.productId === product.id && bundle.project.questions.find(q => q.id === r.questionId)?.[field] === value);
     const dimensions = Object.fromEntries(['A','B','C','F'].map(dim => {
-      const scores = rows.flatMap(r => r.failed && !r.mediaIds.length ? bundle.project.scheme.policies.failedNoOutput === 'score-one' ? [1] : [] : [Math.min(5, ...r.tags.filter(t => bundle.project.scheme.tags.find(d => d.code === t.code)?.dimension === dim).map(t => ({P0:1,P1:2,P2:3,P3:4})[t.severity]))]);
+      const scores = rows.flatMap(r => r.failed && !r.mediaIds.length ? bundle.project.scheme.policies.failedNoOutput === 'score-one' ? [1] : [] : [recordDimensionScore(bundle.project.scheme, r, dim)!]);
       return [dim, { value: scores.length ? scores.reduce((a,b) => a+b,0)/scores.length : null, n: scores.length }];
     }));
     return { productId: product.id, expected, submitted: rows.length, dimensions };
@@ -86,6 +87,7 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
     format: 'eval-studio-report-draft', schemaVersion: 1, status: 'draft' as const, demo,
     generatedAt, basis, scope: '真实竞品报告草稿；模拟自家与 GSB 单列；不将项目标为已归档',
     project: bundle.project, notes: notes ?? null, results, recommendation, checks,
+    ...(isAnchorMode(bundle.project.scheme) ? { anchorScores: valid.map(({id,questionId,productId,ratings}) => ({id,questionId,productId,ratings})) } : {}),
     joint: { ...joint, plan: state?.joint?.plan ?? null, rankings: ranks },
     quality: { ...quality, unresolved: quality.unresolved.map(t => t.id) },
     groups: { scenes: groups('scene'), categories: groups('category'), difficulties: groups('difficulty') },
@@ -98,10 +100,10 @@ const cell = (value: unknown) => String(value ?? '—').replace(/\|/g,'\\|').rep
 export function reportMarkdown(report: Report): string {
   const product = (id: string) => report.project.products.find(p => p.id === id)?.name ?? id;
   const notes = report.notes;
-  const lines = [`# ${report.project.name} · ${report.demo ? '界面演示报告' : '报告草稿'}`, '', '> 草稿，不代表项目已完成归档。缺失数据保留为空；原图需另存汇总主包。', '', `生成时间：${report.generatedAt}`, `统计口径：${report.basis === 'original' ? '原始初评' : '裁决口径参考分'}`, `规则：${report.project.schemeHash}`, `题库：${report.project.questionsHash}`, '', '## 结论与建议', '', notes?.summary || '待填写', '', '### 产品优势与短板', '', notes?.productInsights || '待填写', '', '### 对自家产品的启示', '', notes?.recommendations || '待填写', '', '## 综合对比', '', '| 产品 | 数据性质 | A | B | C | D | E | F | G | 总分 /100 | 可用率 | 平均秒 | 可用图成本 | 推荐状态 |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
-  const methods = ['## 评测方法', '', `项目背景：${report.project.background || '待填写'}`, `评测周期：${report.project.period || '待填写'}`, `评测集：${report.project.questions.length} 题；${report.project.members.length} 名成员；${report.project.products.filter(p=>!p.demo).length} 个真实对比对象。`, `维度权重：${report.project.scheme.dimensions.map(d=>`${d.id} ${d.name} ${d.weight}%`).join('；')}`, '图像维度按该维度最严重标签换算 1–5 分；D 为固定编辑走查，E 为可用率/速度/成本，G 为逐题体验标签与整体走查各占一半。', '共同校准、独立复评、一致率及全量复查状态见下方检查；分组结果仅代表实际有效样本，不进行缺失值填补。', ''];
+  const lines = [`# ${report.project.name} · ${report.demo ? '界面演示报告' : '报告草稿'}`, '', '> 草稿，不代表项目已完成归档。缺失数据保留为空；原图需另存汇总主包。', '', `生成时间：${report.generatedAt}`, `统计口径：${report.basis === 'original' ? '原始初评' : '裁决口径参考分'}`, `规则：${report.project.schemeHash}`, `题库：${report.project.questionsHash}`, '', '## 结论与建议', '', notes?.summary || '待填写', '', '### 产品优势与短板', '', notes?.productInsights || '待填写', '', '### 对自家产品的启示', '', notes?.recommendations || '待填写', '', '## 综合对比', '', `| 产品 | 数据性质 | A | B | C | D | E | F | G | 总分 /${isAnchorMode(report.project.scheme) ? '5' : '100'} | 可用率 | 平均秒 | 可用图成本 | 推荐状态 |`, '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+  const methods = ['## 评测方法', '', `项目背景：${report.project.background || '待填写'}`, `评测周期：${report.project.period || '待填写'}`, `评测集：${report.project.questions.length} 题；${report.project.members.length} 名成员；${report.project.products.filter(p=>!p.demo).length} 个真实对比对象。`, `维度权重：${report.project.scheme.dimensions.map(d=>`${d.id} ${d.name} ${d.weight}%`).join('；')}`, isAnchorMode(report.project.scheme) ? '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分并填写依据；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。' : '图像维度按该维度最严重标签换算 1–5 分；D 为固定编辑走查，E 为可用率/速度/成本，G 为逐题体验标签与整体走查各占一半。', '共同校准、独立复评、一致率及全量复查状态见下方检查；分组结果仅代表实际有效样本，不进行缺失值填补。', ''];
   lines.splice(lines.indexOf('## 综合对比'), 0, ...methods);
-  for (const row of report.results) lines.push(`| ${cell(product(row.productId))} | ${report.project.products.find(p=>p.id===row.productId)?.demo ? '模拟' : '真实对象'} | ${(['A','B','C','D','E','F','G'] as DimensionId[]).map(id=>`${num(row.dimensions[id].value)} (${row.dimensions[id].n}/${row.dimensions[id].expected})`).join(' | ')} | ${num(row.total === null ? null : row.total*20,1)} | ${pct(row.usableRate)} | ${num(row.meanSeconds,1)} | ${num(row.costPerUsable,3)} | ${cell(row.eligibility)}${row.vetoReasons.length ? '：'+cell(row.vetoReasons.join('；')) : ''} |`);
+  for (const row of report.results) lines.push(`| ${cell(product(row.productId))} | ${report.project.products.find(p=>p.id===row.productId)?.demo ? '模拟' : '真实对象'} | ${(['A','B','C','D','E','F','G'] as DimensionId[]).map(id=>`${num(row.dimensions[id].value)} (${row.dimensions[id].n}/${row.dimensions[id].expected})`).join(' | ')} | ${num(row.total === null ? null : row.total*(isAnchorMode(report.project.scheme)?1:20),isAnchorMode(report.project.scheme)?2:1)} | ${pct(row.usableRate)} | ${num(row.meanSeconds,1)} | ${num(row.costPerUsable,3)} | ${cell(row.eligibility)}${row.vetoReasons.length ? '：'+cell(row.vetoReasons.join('；')) : ''} |`);
   lines.push('', '维度值后的括号为已计入数量 / 应计数量；未齐全的维度仅作参考。完整总分需七维数据齐全。分组只列可按题汇总的 A/B/C/F，不把产品级 D/E/G 冒充为场景总分。', '', '## 分场景表现', '', '| 场景 | 产品 | 提交 | A | B | C | F |', '|---|---|---|---|---|---|---|');
   for (const group of report.groups.scenes) for (const row of group.products) lines.push(`| ${cell(group.value)} | ${cell(product(row.productId))} | ${row.submitted}/${row.expected} | ${['A','B','C','F'].map(dim=>`${num(row.dimensions[dim].value)} (${row.dimensions[dim].n}/${row.expected})`).join(' | ')} |`);
   lines.push('', '## 联合对比评审', '', `${report.joint.completed}/${report.joint.expected} 题有效排名${report.joint.plan?.trial ? '（试跑）' : ''}；${report.joint.unable} 题无法判断。`, '', '| 产品甲 / 产品乙 | 甲胜 | 平 | 甲负 | 有效题 | 甲净胜率 |', '|---|---|---|---|---|---|');
@@ -121,5 +123,6 @@ export function reportMarkdown(report: Report): string {
     lines.push('', ranking?.reason || '尚无共同判断', '');
   }
   lines.push('## 局限与备注处理', '', notes?.limitations || '待填写', '', notes?.noteResolution || '尚无备注处理说明', '', '## 交付前检查', '', ...report.checks.map(check=>`- [${check.passed?'x':' '}] ${check.title}：${check.detail}`), '', '参与人：'+(notes?.participants.map(id=>report.project.members.find(m=>m.id===id)?.name ?? id).join('、') || '尚未确认'), '', '本文件及 JSON 明细不包含原图，不能作为可恢复项目备份。请同时保存汇总主包、清单和全部 ZIP。');
+  if (isAnchorMode(report.project.scheme)) lines.push('', '## 锚点评分与依据', '', ...((report.anchorScores ?? []).flatMap(row => Object.entries(row.ratings ?? {}).map(([id,r]) => `- ${row.questionId} / ${product(row.productId)} / ${id}：${r.score} 分；${r.reason}`))));
   return lines.join('\n');
 }

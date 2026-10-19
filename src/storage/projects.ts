@@ -1,3 +1,4 @@
+import { isAnchorMode } from '../core/ratings';
 import baseline from '../../schemes/ecommerce-t2i/scheme.json';
 import type { Asset, AssetMetadata, Evaluation, Experience, Project, ProjectBundle, Scheme, Walkthrough, StageAudit } from '../core/model';
 import { latestEvaluations, validateEvaluation } from '../core/assessment';
@@ -69,6 +70,7 @@ export async function createProject(name: string): Promise<Project> {
     id: baseline.id, name: baseline.name, version: '0.1.0',
     dimensions: structuredClone(baseline.dimensions),
     tags: structuredClone(baseline.tags) as Scheme['tags'],
+    rating: structuredClone(baseline.rating) as Scheme['rating'],
     jointReview: structuredClone(baseline.jointReview),
     policies: { failedNoOutput: 'unresolved', rankingTies: 'unresolved', zeroUsableCost: 'unresolved' }
   };
@@ -246,7 +248,7 @@ export async function saveWalkthroughs(projectId: string, walkthroughs: Walkthro
 }
 
 export type FormalBackup = {
-  format: 'eval-studio-project-backup'; schemaVersion: 1; exportedAt: string;
+  format: 'eval-studio-project-backup'; schemaVersion: 1 | 2; exportedAt: string;
   bundle: ProjectBundle; snapshots: Project[];
   blobs: { sha256: string; mime: string; data: string }[];
   audits?: StageAudit[];
@@ -277,7 +279,7 @@ export async function exportProject(projectId: string): Promise<FormalBackup> {
     blobs.push({ sha256, mime: asset.mime, data: await toBase64(raw.blob) });
   }
   const audits = await requestValue<StageAudit[]>(db.transaction('stageReceipts').objectStore('stageReceipts').index('projectId').getAll(projectId));
-  return { format: 'eval-studio-project-backup', schemaVersion: 1, exportedAt: new Date().toISOString(), bundle, snapshots: snapshots.map(item => item.project), blobs, audits };
+  return { format: 'eval-studio-project-backup', schemaVersion: isAnchorMode(bundle.project.scheme) ? 2 : 1, exportedAt: new Date().toISOString(), bundle, snapshots: snapshots.map(item => item.project), blobs, audits };
 }
 
 export async function restoreProject(raw: unknown): Promise<Project> {

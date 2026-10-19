@@ -1,8 +1,9 @@
+import { isAnchorMode } from './ratings.ts';
 import type { Asset, Project, ProjectBundle, StageAudit } from './model.ts';
 import { validateArchiveMetadata } from './backup.ts';
 
 export type StagePackage = {
-  format: 'eval-studio-stage-package'; schemaVersion: 1;
+  format: 'eval-studio-stage-package'; schemaVersion: 1 | 2;
   packageId: string; exportedAt: string; senderId: string;
   kind: 'assignment' | 'submission' | 'baseline'; productIds: string[];
   bundle: ProjectBundle; snapshots: Project[]; audits?: StageAudit[];
@@ -164,7 +165,10 @@ function sameKeys(value: Record<string, unknown>, expected: string[]) {
 }
 
 function manifestErrors(raw: unknown): string[] {
-  if (!object(raw) || raw.format !== 'eval-studio-stage-package' || raw.schemaVersion !== 1) return ['不是支持的阶段数据包'];
+  if (!object(raw) || raw.format !== 'eval-studio-stage-package' || ![1,2].includes(Number(raw.schemaVersion))) return ['不是支持的阶段数据包'];
+  if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) return ['阶段包版本无效'];
+  const anchorScheme = object(raw.bundle) && object(raw.bundle.project) && object(raw.bundle.project.scheme) && object(raw.bundle.project.scheme.rating) && raw.bundle.project.scheme.rating.mode === 'anchors';
+  if (raw.schemaVersion !== (anchorScheme ? 2 : 1)) return ['阶段包版本与评分方式不一致，请升级工作台'];
   const keys = ['format', 'schemaVersion', 'packageId', 'exportedAt', 'senderId', 'kind', 'productIds', 'bundle', 'snapshots', 'media', 'parts', 'manifestHash', ...(raw.audits === undefined ? [] : ['audits'])];
   if (!sameKeys(raw, keys) || !identity(raw.packageId) || !validDate(raw.exportedAt) || typeof raw.senderId !== 'string' || !raw.senderId.trim() || raw.senderId.length > 200 || !['assignment', 'submission', 'baseline'].includes(String(raw.kind)) || !Array.isArray(raw.productIds) || !hash(raw.manifestHash) || !Array.isArray(raw.media) || raw.media.length > MAX_MEDIA || !Array.isArray(raw.parts) || raw.parts.length > MAX_PARTS) return ['数据包清单字段或数量无效'];
   const errors = validateArchiveMetadata(raw);
@@ -285,7 +289,7 @@ export async function buildStagePackage(input: PackageInput, loadAsset: (id: str
     parts.push({ index, name, sha256: (await checksum(blob)).sha256, size: blob.size, entries: group.map(item => item.path) });
   }
   const manifest: StagePackage = {
-    format: 'eval-studio-stage-package', schemaVersion: 1, packageId, exportedAt,
+    format: 'eval-studio-stage-package', schemaVersion: isAnchorMode(input.bundle.project.scheme) ? 2 : 1, packageId, exportedAt,
     senderId: data.senderId, kind: data.kind, productIds: data.productIds,
     bundle: data.bundle, snapshots: data.snapshots, ...(data.audits === undefined ? {} : { audits: data.audits }),
     media, parts, manifestHash: '',
