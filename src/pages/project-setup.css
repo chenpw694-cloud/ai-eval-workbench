@@ -186,8 +186,8 @@
 .setup-distributions > .panel > div { display: flex; flex-wrap: wrap; gap: 9px; }
 .setup-distributions > .panel span { display: flex; align-items: center; gap: 12px; font-size: 10px; color: #aa8ebd; padding: 6px 8px; border-radius: 5px; background: #faf6fd; }
 .setup-distributions span strong { font-size: 10px; font-weight: 500; color: #a586bd; }
-.setup-weight-table td:first-child { display: flex; align-items: center; gap: 10px; }
-.setup-weight-table td:first-child > strong { min-width: 0; }
+.setup-dimension-cell { display: flex; align-items: center; gap: 10px; }
+.setup-dimension-cell > strong { min-width: 0; font-size: 11px; font-weight: 500; color: #6e547f; }
 .setup-weight-table th:first-child, .setup-weight-table td:first-child { padding-left: 23px; }
 .setup-weight-table td:last-child { width: 130px; }
 .setup-dimension-id { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 6px; background: #f3edf9; color: #aa8bc2; font-size: 11px; }
