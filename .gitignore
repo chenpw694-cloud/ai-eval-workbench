@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.DS_Store
+.env*
+!.env.example
+.sites-runtime/
+*.log
+coverage/
+real-evaluation-data/
+.pnpm-store/
+.vscode/
+.idea/
+# 本机导出的评测文件不进入源码仓库。
+*.eval.json
+*.archive.json
+*.report.json
+*.report.md
+*.part-*.zip
+local-backups/
