@@ -4,7 +4,9 @@
 
 源码已加入 `.github/workflows/ci-pages.yml`。推送或发起 Pull Request 会检查测试与构建；仅默认分支的成功构建可以部署到 Pages。手动运行也仅在默认分支发布。上传的站点产物只有 `dist/`，不包含本机 IndexedDB。
 
-这份配置尚未在目标 GitHub 仓库运行，不能视为已完成线上部署。目标空仓库已创建为 [chenpw694-cloud/ai-eval-workbench](https://github.com/chenpw694-cloud/ai-eval-workbench)，可见性为 Public，当前尚无提交。项目所有者已确认采用 MIT，根目录已有 LICENSE，待随源码上传。GitHub 连接器与浏览器账号不同，本次仓库已按所有者选择，通过浏览器创建于 chenpw694-cloud 下。
+项目已上传至 [chenpw694-cloud/ai-eval-workbench](https://github.com/chenpw694-cloud/ai-eval-workbench)，采用 MIT 许可证。GitHub Pages 已配置为 Actions 来源，首次 [线上测试、构建与部署](https://github.com/chenpw694-cloud/ai-eval-workbench/actions/runs/39227784761) 全部成功。公开网址为 [AI 产品评测工作台](https://chenpw694-cloud.github.io/ai-eval-workbench/)。
+
+GitHub 连接器与浏览器账号不同，本仓库按所有者选择归属于 chenpw694-cloud。本地 Git 已关联该远程仓库，可继续在本份代码上开发。
 
 ## 首次发布
 
@@ -51,8 +53,10 @@
 ## 本次发布准备的验证
 
 - 207 项自动测试通过，0 失败；TypeScript 检查及生产构建通过。
-- 工作流 YAML 可解析，包含 check 和 deploy 两个任务；目标仓库的 Actions 执行仍待接入后验证。
+- 工作流 YAML 可解析，包含 check 和 deploy 两个任务；目标仓库的首次 Actions 执行已成功。
 - 用生产产物在本机 `/ai-eval-workbench/` 子目录启动静态服务，实际打开归档演示、切换联合排名并确认三张示范图加载成功，再打开正式项目列表。没有将现有开发网址的数据复制进测试源。
 - 源码快照不包含 `node_modules/`、`dist/`、本机数据库、导出包、私人原图或上层对话工作文件。示范图及合成测试夹具保留。
 
-这次验证确认本机生产构建可用；公网访问速度、目标仓库权限和 Pages 发布结果，需要部署完成后验证。
+线上验证：公开 HTTPS 首页可打开，两张示范图片实际加载，正式项目入口正常，当前新来源显示 0 个本机项目。发布工作流成功，未将原开发地址的 IndexedDB 或评测记录上传。尚未进行真实三人、不同网络下的访问及文件交接验收。
+
+从原本机地址迁移时，应先导出主包和全部 ZIP，再在公开站点导入；网站上线不会自动迁移或共享浏览器数据。
