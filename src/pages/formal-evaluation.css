@@ -183,6 +183,8 @@
 .formal-record-context { font-size: 8px; color: #bcaec7; line-height: 1.9; display: flex; flex-direction: column; gap: 3px; margin-top: 10px; }
 .formal-rating-footer { flex-shrink: 0; padding: 22px 18px 26px; display: grid; grid-template-columns: .85fr 1.4fr; gap: 14px; background: #fff; border-top: 1px solid #eeeaf3; }
 .formal-rating-footer .btn { font-size: 11px; padding: 12px 8px; min-height: 44px; white-space: nowrap; }
+.formal-rating-footer .formal-draft-next { grid-column: 1 / -1; color: #7666aa; background: #faf9fe; border-color: #e7e1f3; }
+.formal-rating-footer p { grid-column: 1 / -1; margin: 0; font-size: 10px; line-height: 1.8; text-align: center; color: #9296a6; }
 .formal-errors { display: flex; align-items: flex-start; gap: 6px; background: #fff7f7; border: 1px solid #f1dfe3; border-radius: 6px; padding: 10px; color: #bf929f; font-size: 10px; line-height: 1.8; margin-top: 14px; }
 .formal-errors > svg { flex-shrink: 0; margin-top: 2px; }
 .formal-errors strong { font-size: 10px; font-weight: 500; }

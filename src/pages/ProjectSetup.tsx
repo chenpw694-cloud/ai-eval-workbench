@@ -41,7 +41,7 @@ const importFields = [
   { key: 'difficulty', label: '难度', aliases: ['难度', 'difficulty'] },
   { key: 'request', label: '需求描述', required: true, aliases: ['需求描述', '需求', '提示词', 'request', 'prompt'] },
   { key: 'acceptance', label: '验收要点', required: true, aliases: ['验收要点', '验收标准', 'acceptance'] },
-  { key: 'referenceNames', label: '参考图文件名', aliases: ['参考图文件名', '参考图', 'referenceNames'] }
+  { key: 'referenceNames', label: '参考图文件名', aliases: ['参考图文件名', '参考图', 'referenceNames', 'ref_images', 'referenceImages', 'images'] }
 ];
 
 const roleLabels: Record<ProductRole, string> = {
@@ -376,7 +376,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
     </div>
 
     {locked && <Notice tone="warning">
-      <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景和周期；成员、产品、题目、权重及评分政策保持当前快照，避免团队使用不同题库或已有记录失去引用。
+      <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景和周期；成员、产品、题目、权重及评分政策保持当前快照。{project.status === 'draft' && <> 尚未分发的项目，允许补填原本空白的产品名称或版本；已填写的身份信息保持锁定。</>}
     </Notice>}
 
     {saveError && <div className="setup-error" role="alert"><AlertCircle size={16} />{saveError}</div>}
@@ -453,10 +453,10 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
             </div>
             <div className="setup-form-grid">
               <label className="setup-field">产品名称
-                <input value={product.name} placeholder="填写实际产品名称" disabled={locked || saving} onChange={event => updateProduct(product.id, { name: event.target.value })} />
+                <input value={product.name} placeholder="填写实际产品名称" disabled={saving || (locked && !(project.status === 'draft' && !project.products.find(item => item.id === product.id)?.name.trim()))} onChange={event => updateProduct(product.id, { name: event.target.value })} />
               </label>
               <label className="setup-field">版本 / 会员档位
-                <input value={product.version} placeholder="例如：Web 版 / 专业会员" disabled={locked || saving} onChange={event => updateProduct(product.id, { version: event.target.value })} />
+                <input value={product.version} placeholder="例如：Web 版 / 专业会员" disabled={saving || (locked && !(project.status === 'draft' && !project.products.find(item => item.id === product.id)?.version.trim()))} onChange={event => updateProduct(product.id, { version: event.target.value })} />
               </label>
               <label className="setup-field">竞品角色
                 <select value={product.role} disabled={locked || saving} onChange={event => updateProduct(product.id, { role: event.target.value as ProductRole })}>
@@ -476,7 +476,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
           {!draft.products.length && <div className="panel setup-empty setup-wide">还没有被测产品。添加真实产品，或明确标记一个模拟产品试用流程。</div>}
         </div>
       </section>
-      {pendingProducts.length > 0 && <Notice tone="warning">有 {pendingProducts.length} 个真实产品尚未填齐名称、版本或负责人。可以先保存草稿，正式评测前需补齐。</Notice>}
+      {pendingProducts.length > 0 && <Notice tone="warning">有 {pendingProducts.length} 个真实产品尚未填齐名称、版本或负责人。已配置好的产品可先逐题评测；团队分发、质检和最终汇总前须补齐全部产品。尚未使用的产品可在开始评测前删除。</Notice>}
       <div className="setup-footer"><span>保存的是当前浏览器中的项目快照，仓库方案文件不会自动修改。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '项目信息与产品分工已保存')}><Save size={14} />保存配置</button></div>
     </>}
 
@@ -486,7 +486,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
         <div><span>场景覆盖</span><strong>{new Set(draft.questions.map(question => question.scene).filter(Boolean)).size}<small>类</small></strong></div>
         <div><span>含参考图文件名</span><strong>{questionsWithReferences}<small>题 · 文件仍待上传</small></strong></div>
       </div>
-      <Notice>可先导入少量题目并保存草稿，但计划 {draft.expectedQuestionCount} 题就须导入完整 {draft.expectedQuestionCount} 题后才能分发或开始正式评测。独立试跑 2 题时，请先将计划题量改为 2；分发或开始评测即冻结题库和规则，完整 50 题评测需另建项目。参考图文件名只是引用，实际图片在逐题评测页上传。</Notice>
+      <Notice>可先导入少量题目并保存草稿，但计划 {draft.expectedQuestionCount} 题就须导入完整 {draft.expectedQuestionCount} 题后才能分发或开始正式评测。独立试跑 2 题时，请先将计划题量改为 2；分发或开始评测即冻结题库和规则。JSON 支持 ref_images、referenceImages、images 的文件名数组及图片对象；图片链接和元数据保留在“更多题目字段”，实际图片仍在逐题评测页上传。</Notice>
 
       <section className="panel setup-section setup-import-section">
         <PanelHeading

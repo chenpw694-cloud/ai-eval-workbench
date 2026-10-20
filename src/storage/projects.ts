@@ -3,6 +3,7 @@ import baseline from '../../schemes/ecommerce-t2i/scheme.json';
 import type { Asset, AssetMetadata, Evaluation, Experience, Project, ProjectBundle, Scheme, Walkthrough, StageAudit } from '../core/model';
 import { latestEvaluations, validateEvaluation } from '../core/assessment';
 import { validateBackupStructure } from '../core/backup';
+import { frozenConfigurationMatches } from '../core/projectEditing';
 
 const DATABASE = 'eval-studio-formal-projects';
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -108,13 +109,8 @@ export async function saveProject(input: Project): Promise<Project> {
       evaluations.onsuccess = () => {
         const records = evaluations.result as Evaluation[];
         if (existing && (existing.status === 'active' || records.some(record => record.status === 'submitted'))) {
-          const protectedFields = (p: Project) => ({
-            members: p.members, products: p.products.map(({ totalCost, commercialUse, commercialEvidence, ...rest }) => rest),
-            questions: p.questions, scheme: p.scheme, rulesConfirmed: p.rulesConfirmed,
-            expectedQuestionCount: p.expectedQuestionCount
-          });
-          if (canonical(protectedFields(existing)) !== canonical(protectedFields(input))) {
-            failure = new Error('项目已开始或分发，题库、成员、产品身份和评分规则已冻结；请新建项目使用新方案');
+          if (!frozenConfigurationMatches(existing, input)) {
+            failure = new Error('项目已开始或分发，题库、成员、产品身份和评分规则已冻结；未分发项目仅可补齐原空白产品名称和版本');
             transaction.abort(); return;
           }
         }
@@ -215,7 +211,7 @@ export async function saveEvaluation(projectId: string, record: Evaluation, newA
         metadata.onsuccess = () => {
           const assets = [...metadata.result as AssetMetadata[], ...newAssets.map(({ blob, ...asset }) => asset)];
           if (record.status === 'submitted') {
-            const errors = validateEvaluation(project, record, assets);
+            const errors = validateEvaluation(project, record, assets, { scope: 'task' });
             if (errors.length) { failure = new Error(errors.join('；')); transaction.abort(); return; }
           }
           const allReferences = new Set(assets.map(asset => asset.id));

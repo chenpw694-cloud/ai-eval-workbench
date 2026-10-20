@@ -6,7 +6,7 @@ import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight
 import type { Asset, AssetMetadata, Evaluation, MediaCheck, ProjectBundle, TagAssignment } from '../core/model';
 import type { Severity } from '../core/scoring';
 import { dimensionScore } from '../core/scoring';
-import { allowedSeverities, latestEvaluations, validateEvaluation } from '../core/assessment';
+import { allowedSeverities, latestEvaluations, validateEvaluation, validateProject } from '../core/assessment';
 import { createAsset, getAsset } from '../storage/projects';
 import './formal-evaluation.css';
 
@@ -177,6 +177,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       setOutputs(nextOutputs);
       setReferences(assets.filter(asset => asset.role === 'reference'));
       setActiveMediaId(record?.bestMediaId ?? nextOutputs[0]?.id ?? null);
+      if (!record?.bestMediaId && nextOutputs.length === 1) setBestMediaId(nextOutputs[0].id);
     }).catch(error => {
       if (version !== readVersion.current) return;
       setLoadError(error instanceof Error ? error.message : '本地原图读取失败，请刷新后重试。');
@@ -244,6 +245,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         setOutputs(previous => [...previous, ...uploaded]);
         setMediaChecks(previous => [...previous, ...uploaded.map(asset => ({ mediaId: asset.id, usable: null, infringement: null }))]);
         if (!activeMediaId) setActiveMediaId(uploaded[0].id);
+        if (outputs.length === 0 && uploaded.length === 1) setBestMediaId(uploaded[0].id);
       } else setReferences(previous => [...previous, ...uploaded]);
       edited();
       onToast(`已读取 ${uploaded.length} 张原图，保存后写入本机；请逐张检查。`);
@@ -266,7 +268,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     setOutputs(remaining);
     setMediaChecks(previous => previous.filter(check => check.mediaId !== id));
     setPendingAssets(previous => previous.filter(asset => asset.id !== id));
-    if (bestMediaId === id) setBestMediaId(null);
+    if (remaining.length === 1) setBestMediaId(remaining[0].id);
+    else if (bestMediaId === id) setBestMediaId(null);
     if (activeMediaId === id) setActiveMediaId(remaining[0]?.id ?? null);
     edited();
   }
@@ -286,7 +289,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     const record: Evaluation = {
       id: crypto.randomUUID(), projectId: project.id, questionId, productId, reviewerId,
       revision: (parent?.revision ?? 0) + 1, parentId: parent?.id ?? null,
-      status: nextStatus, mediaIds: outputs.map(asset => asset.id), bestMediaId,
+      status: nextStatus, mediaIds: outputs.map(asset => asset.id), bestMediaId: outputs.length === 1 ? outputs[0].id : bestMediaId,
       mediaChecks: outputs.map(asset => mediaChecks.find(check => check.mediaId === asset.id) ?? { mediaId: asset.id, usable: null, infringement: null }),
       ...(isAnchorMode(project.scheme) ? { ratings } : {}),
       tags: selectedTags.map(tag => ({ ...tag })), seconds: seconds.trim() === '' ? null : Number(seconds),
@@ -294,7 +297,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       createdAt: new Date().toISOString(),
     };
     if (nextStatus === 'submitted') {
-      const validationErrors = validateEvaluation(project, record, [...bundle.assets, ...pendingAssets]);
+      const validationErrors = validateEvaluation(project, record, [...bundle.assets, ...pendingAssets], { scope: 'task' });
       if (validationErrors.length) {
         setErrors(validationErrors.map(error => outputs.reduce((message, asset, index) => message.replaceAll(asset.id, `第 ${index + 1} 张原图（${asset.name}）`), error)));
         onToast('尚未提交，请根据提示补全评测记录。');
@@ -311,7 +314,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       setStatus(nextStatus);
       dirtyRef.current = false;
       setDirty(false);
-      onToast(nextStatus === 'submitted' ? `已提交第 ${record.revision} 版评测。` : `草稿已保存（第 ${record.revision} 版）。`);
+      onToast(nextStatus === 'submitted' ? `已提交第 ${record.revision} 版评测。${validateProject(project).length ? '其他产品配置仍待补齐，汇总暂保留缺口。' : ''}` : `草稿已保存（第 ${record.revision} 版），未计入正式结果。`);
       if (goNext) {
         const nextQuestion = project.questions[project.questions.findIndex(item => item.id === questionId) + 1];
         if (nextQuestion) setQuestionId(nextQuestion.id);
@@ -406,11 +409,11 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       <aside className="panel formal-rating">
         <div className="formal-rating-header"><h2>评测记录</h2><span className={`formal-save-state ${cleanSubmitted ? 'submitted' : ''}`}>{loading ? '读取中' : busy ? '处理中' : dirty ? '未保存' : cleanSubmitted ? '已提交' : savedRevision ? '已存草稿' : '待评测'}</span></div>
         <div className="formal-rating-scroll"><fieldset disabled={locked}>
-          <label className="formal-field"><span>被测产品</span><select value={productId} onChange={event => navigate(questionId, event.target.value)}>{project.products.map(item => <option key={item.id} value={item.id}>{item.name}{item.version ? ` · ${item.version}` : ''}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
+          <label className="formal-field"><span>被测产品</span><select value={productId} onChange={event => navigate(questionId, event.target.value)}>{project.products.map((item, index) => <option key={item.id} value={item.id}>{item.name.trim() || `待配置产品 ${index + 1}`}{item.version ? ` · ${item.version}` : ''}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
           <label className="formal-field"><span>当前评测员 <small>本地身份</small></span><select value={reviewerId} onChange={event => { setReviewerId(event.target.value); edited(); }}><option value="">请选择评测员</option>{project.members.map(member => <option key={member.id} value={member.id}>{member.name}{product.ownerId === member.id ? ' · 产品负责人' : ''}</option>)}</select></label>
           <p className="formal-help">本地身份用于记录署名；同一产品、同一题目共同维护一条修订历史。</p>
           {isAnchorMode(project.scheme) && <><AnchorRatings scheme={project.scheme} dimensions={failed && !outputs.length ? ['G'] : questionDimensions} values={ratings} disabled={locked} onChange={value => { setRatings(value); edited(); }}/><p className="anchor-readonly">D 在“走查与成本”按编辑任务打分；E 根据可用率、速度和成本计算。A/B/C/F 任一评分 ≤2 时，最佳图不可标为可用。</p></>}
-          <div className="formal-tag-title"><h3>{isAnchorMode(project.scheme) ? '问题标签 · 诊断用' : '最佳图问题标签'}</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">标签仅对应最佳图；流程故障记录在 G 维度。严重等级可在规则允许范围内调整。</p>
+          <div className="formal-tag-title"><h3>{isAnchorMode(project.scheme) ? '问题标签 · 诊断用' : '最佳图问题标签'}</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">按实际问题选标签，无问题可不选；不用逐项填写。图像标签对应最佳图，流程故障记录在 G 维度。</p>
           {reviewDimensions.map(dimension => {
             const definitions = project.scheme.tags.filter(tag => tag.dimension === dimension.id);
             const assignments = selectedTags.filter(tag => definitions.some(definition => definition.code === tag.code));
@@ -445,7 +448,12 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           {loadError && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div>{loadError}</div></div>}
           {errors.length > 0 && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div><strong>请检查以下内容</strong><ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul></div></div>}
         </div>
-        <footer className="formal-rating-footer"><button className="btn" disabled={locked} onClick={() => void persist('draft')}><Save size={15} />保存草稿</button><button className="btn btn-primary" disabled={locked} onClick={() => void persist('submitted', true)}>{busy ? '处理中…' : position === project.questions.length - 1 ? '提交评测' : '提交并下一题'}<ArrowRight size={15} /></button></footer>
+        <footer className="formal-rating-footer">
+          <button className="btn" disabled={locked} onClick={() => void persist('draft')}><Save size={15} />保存草稿</button>
+          <button className="btn btn-primary" disabled={locked} onClick={() => void persist('submitted', true)}>{busy ? '处理中…' : position === project.questions.length - 1 ? '提交评测' : '提交并下一题'}<ArrowRight size={15} /></button>
+          {position < project.questions.length - 1 && <button className="btn formal-draft-next" disabled={locked} onClick={() => void persist('draft', true)}>保存草稿并下一题<ChevronRight size={15} /></button>}
+          <p>暂时未填齐可保存草稿并继续，补齐后再提交。</p>
+        </footer>
       </aside>
     </div>
     <dialog ref={dialogRef} className="formal-image-dialog" onClick={event => { if (event.target === event.currentTarget) dialogRef.current?.close(); }}><div className="formal-dialog-top"><span>{dialogAsset?.name}</span><button className="btn btn-small" onClick={() => dialogRef.current?.close()} aria-label="关闭原图"><X size={18} /></button></div>{dialogAsset && <img src={assetUrl(dialogAsset)} alt={dialogAsset.name} />}<p>原始图片 · {dialogAsset && humanSize(dialogAsset.size)} · 按原比例展示，可通过浏览器缩放查看细节。</p></dialog>

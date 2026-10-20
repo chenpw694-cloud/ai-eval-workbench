@@ -92,9 +92,9 @@ function tagErrors(project: Project, assignments: TagAssignment[], allowed: stri
   return errors;
 }
 
-/** Submission validation. Incomplete drafts may still be stored by the caller. */
-export function validateEvaluation(project: Project, record: Evaluation, assets: AssetMetadata[]): string[] {
-  const errors: string[] = [...validateProject(project)];
+/** Task collection may proceed before other products are configured; reporting stays strict. */
+export function validateEvaluation(project: Project, record: Evaluation, assets: AssetMetadata[], options: { scope?: 'project' | 'task' } = {}): string[] {
+  const errors: string[] = projectErrors(project, options.scope === 'task' ? record.productId : undefined);
   const question = project.questions.find(item => item.id === record.questionId);
   const product = project.products.find(item => item.id === record.productId);
   if (record.projectId !== project.id) errors.push('评测记录不属于当前项目');
@@ -129,7 +129,7 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
     if (check?.infringement === true && check.usable === true) errors.push(`存在侵权风险的图片不可标记为可用：${mediaId}`);
   }
   if (record.mediaIds.length > 0) {
-    if (!record.bestMediaId || !record.mediaIds.includes(record.bestMediaId)) errors.push('最佳图必须引用本题现有原图');
+    if (!record.bestMediaId || !record.mediaIds.includes(record.bestMediaId)) errors.push('请选择最佳图：在生成结果下点击“设为最佳图”');
     else {
       const check = record.mediaChecks.find(item => item.mediaId === record.bestMediaId);
       const seriousImageTag = record.tags.some(assignment => {
@@ -148,6 +148,10 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
 }
 
 export function validateProject(project: Project): string[] {
+  return projectErrors(project);
+}
+
+function projectErrors(project: Project, currentProductId?: string): string[] {
   const errors: string[] = [];
   if (!filled(project.id)) errors.push('项目 ID 不可为空');
   if (!filled(project.name)) errors.push('项目名称不可为空');
@@ -158,11 +162,14 @@ export function validateProject(project: Project): string[] {
   }
   if (project.members.some(member => !filled(member.name))) errors.push('成员姓名不可为空');
   if (!project.products.some(product => !product.demo)) errors.push('至少需要一个真实产品');
-  for (const product of project.products) {
-    if (!filled(product.name)) errors.push(`产品 ${product.id} 的名称不可为空`);
-    if (!filled(product.version)) errors.push(`产品 ${product.id} 的版本或档位不可为空`);
-    if (!project.members.some(member => member.id === product.ownerId)) errors.push(`产品 ${product.id} 的负责人不在项目成员中`);
-    if (product.totalCost !== null && (!Number.isFinite(product.totalCost) || product.totalCost < 0)) errors.push(`产品 ${product.id} 的费用须为非负有限数或未知`);
+  for (const [index, product] of project.products.entries()) {
+    const label = filled(product.name) ? `产品“${product.name.trim()}”` : `第 ${index + 1} 个产品`;
+    // Ownership freezes after the first submission, so no product may retain a broken member reference.
+    if (!project.members.some(member => member.id === product.ownerId)) errors.push(`${label} 的负责人不在项目成员中`);
+    if (currentProductId !== undefined && product.id !== currentProductId) continue;
+    if (!filled(product.name)) errors.push(`${label} 的名称不可为空，请在“项目与题库”填写`);
+    if (!filled(product.version)) errors.push(`${label} 的版本或档位不可为空，请在“项目与题库”填写`);
+    if (product.totalCost !== null && (!Number.isFinite(product.totalCost) || product.totalCost < 0)) errors.push(`${label} 的费用须为非负有限数或未知`);
   }
   if (!project.questions.length) errors.push('题库至少需要一道题');
   if (!Number.isSafeInteger(project.expectedQuestionCount) || project.expectedQuestionCount < 1) errors.push('计划题量必须为正整数');

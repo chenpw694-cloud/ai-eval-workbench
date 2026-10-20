@@ -114,6 +114,53 @@ test('direct evaluation submission cannot bypass preparation with a blank produc
   assert.equal(result(bundle).total, null);
 });
 
+test('task collection ignores unrelated product setup without weakening project reporting', () => {
+  const bundle = fixture(3, 1);
+  const unfinished = bundle.project.products[1];
+  unfinished.name = '';
+  unfinished.version = '';
+  unfinished.totalCost = -1;
+  const current = record(bundle);
+  assert.deepEqual(current.tags, []); // No issue means no diagnosis tags are required.
+  assert.deepEqual(validateEvaluation(bundle.project, current, bundle.assets, { scope: 'task' }), []);
+  assert.match(validateEvaluation(bundle.project, current, bundle.assets).join('\n'), /产品.*名称不可为空/);
+  assert.match(validateProject(bundle.project).join('\n'), /版本或档位不可为空/);
+  assert.equal(result(bundle).total, null);
+  unfinished.name = '已补齐竞品';
+  unfinished.version = 'Web';
+  unfinished.ownerId = bundle.project.members[1].id;
+  unfinished.totalCost = null;
+  assert.deepEqual(validateEvaluation(bundle.project, current, bundle.assets), []);
+  assert.equal(result(bundle).submitted, 1);
+});
+
+test('task collection still validates the current product and its evidence', () => {
+  const bundle = fixture(2, 1);
+  const current = record(bundle);
+  bundle.project.products[0].version = '';
+  current.bestMediaId = null;
+  current.mediaChecks[0].usable = null;
+  const errors = validateEvaluation(bundle.project, current, bundle.assets, { scope: 'task' }).join('\n');
+  assert.match(errors, /版本或档位不可为空/);
+  assert.match(errors, /请选择最佳图/);
+  assert.match(errors, /尚未检查可用性/);
+  current.productId = 'missing-product';
+  assert.match(validateEvaluation(bundle.project, current, bundle.assets, { scope: 'task' }).join('\n'), /被测产品不存在/);
+});
+
+test('task collection preserves project structure, rule and question completeness checks', () => {
+  const bundle = fixture(2, 1);
+  bundle.project.rulesConfirmed = false;
+  bundle.project.expectedQuestionCount = 50;
+  bundle.project.products.push(clone(bundle.project.products[1]));
+  bundle.project.products[1].ownerId = '';
+  const errors = validateEvaluation(bundle.project, record(bundle), bundle.assets, { scope: 'task' }).join('\n');
+  assert.match(errors, /确认评测规则/);
+  assert.match(errors, /计划 50 题/);
+  assert.match(errors, /产品 ID 不可重复/);
+  assert.match(errors, /负责人不在项目成员中/);
+});
+
 test('project publication rejects invalid owners, members, versions, questions, weights and rules', () => {
   const bundle = fixture();
   bundle.project.name = ' ';

@@ -93,6 +93,75 @@ test('JSON standard question round trips and keeps custom fields', () => {
   assert.deepEqual(parseQuestionsJson('[{"id":"1","request":"需求","acceptance":["要点"],"渠道":"电商","数量":3}]')[0].fields, { 渠道: '电商', 数量: '3' });
 });
 
+test('JSON image aliases accept filename arrays and retain the original values as text', () => {
+  const images = [' R01_精华液.png ', '侧面.png', 'R01_精华液.png'];
+  for (const key of ['ref_images', 'referenceImages', 'images']) {
+    const [question] = parseQuestionsJson(JSON.stringify([{ id: 'Q1', request: '需求', acceptance: ['要点'], [key]: images }]));
+    assert.deepEqual(question.referenceNames, ['R01_精华液.png', '侧面.png']);
+    assert.equal(question.fields[key], JSON.stringify(images));
+    assert.deepEqual(parseQuestionsJson(JSON.stringify([question])), [question]);
+  }
+});
+
+test('JSON image objects keep metadata while local name and filename entries become upload references', () => {
+  const refs = [{ filename: '正面.png', caption: '白底' }, { name: '背面.png' }, { fileName: '左侧.png' }];
+  const [question] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], referenceNames: ['正面.png'], ref_images: refs }]));
+  assert.deepEqual(question.referenceNames, ['正面.png', '背面.png', '左侧.png']);
+  assert.deepEqual(JSON.parse(question.fields.ref_images), refs);
+});
+
+test('JSON local image paths match uploaded basenames while preserving their source paths', () => {
+  const refs = ['./素材/正面.png', 'C:\\评测\\侧面.png', { path: '/Users/example/背面.png' }];
+  const [question] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], ref_images: refs }]));
+  assert.deepEqual(question.referenceNames, ['正面.png', '侧面.png', '背面.png']);
+  assert.deepEqual(JSON.parse(question.fields.ref_images), refs);
+  const [canonical] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], referenceNames: ['./素材/正面.png'] }]));
+  assert.deepEqual(canonical.referenceNames, ['正面.png']);
+  assert.deepEqual(JSON.parse(canonical.fields.referenceNames), ['./素材/正面.png']);
+});
+
+test('JSON remote and embedded image sources are retained without requiring a local file or fetching them', () => {
+  const embedded = 'data:image/png;base64,aGVsbG8=';
+  const refs = [
+    'https://example.test/reference.png?token=1',
+    '//example.test/another.png',
+    embedded,
+    { filename: '来源.png', url: 'https://example.test/source.png', caption: '来源说明' },
+    { name: '商品图', data: embedded },
+    { url: 'https://example.test/only-url.png' },
+    { src: 'https://example.test/src.png' }
+  ];
+  const [question] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], images: refs }]));
+  assert.deepEqual(question.referenceNames, []);
+  assert.deepEqual(JSON.parse(question.fields.images), refs);
+  assert.equal(Object.keys(question.fields).length, 1);
+  const [single] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], ref_images: embedded }]));
+  assert.deepEqual(single.referenceNames, []);
+  assert.equal(single.fields.ref_images, embedded);
+});
+
+test('canonical referenceNames also tolerates image objects and external sources without losing data', () => {
+  const refs = ['local.png', 'https://example.test/source.png', { filename: 'side.png' }];
+  const [question] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], referenceNames: refs }]));
+  assert.deepEqual(question.referenceNames, ['local.png', 'side.png']);
+  assert.deepEqual(JSON.parse(question.fields.referenceNames), refs);
+});
+
+test('optional empty image aliases import and source field collisions never overwrite custom data', () => {
+  const [question] = parseQuestionsJson(JSON.stringify([{ id: 1, request: '需求', acceptance: ['要点'], ref_images: ['商品.png'], images: null, referenceImages: [], fields: { ref_images: '保留的原备注' } }]));
+  assert.deepEqual(question.referenceNames, ['商品.png']);
+  assert.equal(question.fields.ref_images, '保留的原备注');
+  assert.equal(question.fields['ref_images（图片来源 1）'], '["商品.png"]');
+  assert.equal(question.fields.referenceImages, '[]');
+});
+
+test('malformed image entries report the actual record line with usable guidance', () => {
+  const row = { id: 'Q1', request: '需求', acceptance: ['要点'], ref_images: [{ width: 100 }] };
+  assert.throws(() => parseQuestionsJson(`[\n${JSON.stringify(row)}\n]`), /第 2 行.*ref_images.*name、filename 或 url/);
+  row.ref_images = [17];
+  assert.throws(() => parseQuestionsJson(JSON.stringify([row])), /ref_images.*图片引用对象/);
+});
+
 test('JSON reports exact record line for duplicate ids in pretty printed input', () => {
   const source = '[\n  {"id":"1","request":"需求","acceptance":["一","二"]},\n  {\n    "id":"1","request":"需求","acceptance":["要点"]\n  }\n]';
   assert.throws(() => parseQuestionsJson(source), /第 3 行.*重复.*第 2 行/);

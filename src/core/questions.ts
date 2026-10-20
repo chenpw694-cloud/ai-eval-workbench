@@ -1,9 +1,10 @@
 import type { Question } from './model.ts';
 
 const rowLineNumbers = new WeakMap<string[][], number[]>();
+const referenceAliases = ['ref_images', 'referenceImages', 'images'] as const;
 const questionKeys = new Set([
   'id', 'title', 'scene', 'category', 'difficulty',
-  'request', 'acceptance', 'referenceNames', 'fields'
+  'request', 'acceptance', 'referenceNames', 'fields', ...referenceAliases
 ]);
 const mappingKeys = [
   'id', 'title', 'scene', 'category', 'difficulty',
@@ -140,6 +141,53 @@ function stringList(value: unknown, name: string, line: number, required = false
   return result;
 }
 
+function isReferenceSource(value: string): boolean {
+  // These are source references, not files already uploaded to the workbench.
+  return /^\/\//.test(value) || (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^[a-z]:[\\/]/i.test(value));
+}
+
+function referenceList(value: unknown, name: string, line: number): { names: string[]; hasSource: boolean } {
+  if (value === undefined || value === null || value === '') return { names: [], hasSource: false };
+  const entries = typeof value === 'string'
+    ? (isReferenceSource(value.trim()) ? [value.trim()] : splitList(value))
+    : Array.isArray(value) ? value : [value];
+  const names: string[] = [];
+  let hasSource = false;
+  for (const entry of entries) {
+    if (typeof entry === 'string') {
+      const text = entry.trim();
+      if (!text) continue;
+      if (isReferenceSource(text)) hasSource = true;
+      else {
+        const filename = text.split(/[\\/]/).at(-1) || text;
+        if (filename !== text) hasSource = true;
+        names.push(filename);
+      }
+      continue;
+    }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail(line, `${name}须为文件名/来源文本、文本数组，或含 name、filename、url 的图片引用对象。`);
+    }
+    const record = entry as Record<string, unknown>;
+    const keys = ['filename', 'fileName', 'name', 'path', 'url', 'src', 'data', 'dataUrl'] as const;
+    const present = keys.filter(key => typeof record[key] === 'string' && (record[key] as string).trim());
+    if (!present.length) fail(line, `${name}中的图片对象请提供 name、filename 或 url 文本；图片二进制文件仍需单独上传。`);
+    // Preserve the complete object in fields, including captions and source metadata.
+    hasSource = true;
+    if (present.some(key => ['url', 'src', 'data', 'dataUrl'].includes(key) || isReferenceSource((record[key] as string).trim()))) continue;
+    const localName = (record[present[0]] as string).trim();
+    names.push(localName.split(/[\\/]/).at(-1) || localName);
+  }
+  return { names, hasSource };
+}
+
+function retainReferenceSource(entries: [string, string][], key: string, value: unknown) {
+  let fieldName = key;
+  let index = 1;
+  while (entries.some(([name]) => name === fieldName)) fieldName = `${key}（图片来源 ${index++}）`;
+  entries.push([fieldName, typeof value === 'string' ? value : JSON.stringify(value)]);
+}
+
 function normalizeQuestion(input: unknown, line: number): Question {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail(line, '每道题必须是一个 JSON 对象。');
   const value = input as Record<string, unknown>;
@@ -159,6 +207,15 @@ function normalizeQuestion(input: unknown, line: number): Question {
       fieldEntries.push([key, item]);
     });
   }
+  const referenceNames = referenceList(value.referenceNames, '参考图文件名', line);
+  if (referenceNames.hasSource) retainReferenceSource(fieldEntries, 'referenceNames', value.referenceNames);
+  for (const alias of referenceAliases) {
+    if (value[alias] === undefined || value[alias] === null) continue;
+    const references = referenceList(value[alias], alias, line);
+    referenceNames.names.push(...references.names);
+    // Keep the input rather than silently dropping structured image metadata.
+    retainReferenceSource(fieldEntries, alias, value[alias]);
+  }
   Object.entries(value).forEach(([key, item]) => {
     if (questionKeys.has(key)) return;
     if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
@@ -176,7 +233,7 @@ function normalizeQuestion(input: unknown, line: number): Question {
     difficulty: optionalString(value.difficulty, '难度', line),
     request,
     acceptance,
-    referenceNames: stringList(value.referenceNames, '参考图文件名', line),
+    referenceNames: [...new Set(referenceNames.names)],
     fields: Object.fromEntries(fieldEntries)
   };
 }
