@@ -1,10 +1,12 @@
 import AnchorRatings from '../components/AnchorRatings';
 import { isAnchorMode, ratingErrors } from '../core/ratings';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, Settings2, ShieldCheck, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, RotateCcw, Settings2, ShieldCheck, Trash2, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
 import type { Evaluation, Experience, Project, ProjectBundle, TagAssignment, Walkthrough } from '../core/model';
 import { latestEvaluations, summarizeProject, validateProject, allowedSeverities } from '../core/assessment';
 import { createProject, exportProject, getProjectBundle, listProjects, restoreProject, saveEvaluation, saveProject, saveWalkthroughs } from '../storage/projects';
+import { listTrashedProjects, restartProject, restoreTrashedProject, trashProject, type TrashedProject } from '../storage/projectLifecycle';
+import ProjectLifecycleDialog, { type ProjectAction } from '../components/ProjectLifecycleDialog';
 import { downloadJson } from '../storage/local';
 import { PageHeading, PanelHeading, Pill } from '../ui';
 import ProjectSetup from './ProjectSetup';
@@ -18,7 +20,7 @@ import ReportWorkspace from './ReportWorkspace';
 import ArchiveWorkspace from './ArchiveWorkspace';
 import './formal-workspace.css';
 
-type Section = 'overview' | 'setup' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'joint' | 'report' | 'archive' | 'independent';
+type Section = 'overview' | 'setup' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'joint' | 'report' | 'archive' | 'independent' | 'trash';
 const sections = [
   { id: 'overview', label: '项目总览', icon: LayoutDashboard },
   { id: 'setup', label: '项目与题库', icon: Settings2 },
@@ -36,14 +38,19 @@ const sections = [
 function currentRoute(): { id: string | null; section: Section } {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   return {
-    id: parts[0] === 'projects' && parts[1] && !['import', 'independent', 'archives'].includes(parts[1]) ? parts[1] : null,
-    section: parts[1] === 'archives' ? 'archive' : parts[1] === 'independent' ? 'independent' : parts[1] === 'import' ? 'sync' : sections.some(item => item.id === parts[2]) ? parts[2] as Section : 'overview'
+    id: parts[0] === 'projects' && parts[1] && !['import', 'independent', 'archives', 'trash'].includes(parts[1]) ? parts[1] : null,
+    section: parts[1] === 'trash' ? 'trash' : parts[1] === 'archives' ? 'archive' : parts[1] === 'independent' ? 'independent' : parts[1] === 'import' ? 'sync' : sections.some(item => item.id === parts[2]) ? parts[2] as Section : 'overview'
   };
 }
 
 export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   const [route, setRoute] = useState(currentRoute);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [trashedProjects, setTrashedProjects] = useState<TrashedProject[]>([]);
+  const [projectAction, setProjectAction] = useState<ProjectAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [restoringProjectId, setRestoringProjectId] = useState<string | null>(null);
   const [bundle, setBundle] = useState<ProjectBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -67,9 +74,11 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   async function refresh() {
     const target = currentRoute().id;
     try {
-      const [all, selected] = await Promise.all([listProjects(), target ? getProjectBundle(target) : Promise.resolve(null)]);
+      const [all, trashed] = await Promise.all([listProjects(), listTrashedProjects()]);
+      const selected = target && all.some(item => item.id === target) ? await getProjectBundle(target) : null;
       setProjects(all);
-      if (currentRoute().id === target) { setBundle(selected); setReadWarning(''); }
+      setTrashedProjects(trashed);
+      if (currentRoute().id === target) { setBundle(selected); setMissingProject(!!target && !selected); setReadWarning(''); }
     } catch {
       if (currentRoute().id === target) setReadWarning('数据已写入，但列表刷新失败。请返回项目列表重新打开，避免根据旧列表继续操作。');
     }
@@ -83,7 +92,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   }
   function go(id: string | null, section: Section = 'overview') {
     if (!canLeave()) return;
-    location.hash = id ? `/projects/${id}/${section}` : section === 'archive' ? '/projects/archives' : section === 'sync' ? '/projects/import' : section === 'independent' ? '/projects/independent' : '/projects';
+    location.hash = id ? `/projects/${id}/${section}` : section === 'trash' ? '/projects/trash' : section === 'archive' ? '/projects/archives' : section === 'sync' ? '/projects/import' : section === 'independent' ? '/projects/independent' : '/projects';
     window.scrollTo({ top: 0 });
   }
 
@@ -111,10 +120,10 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   useEffect(() => {
     let active = true;
     setLoading(true); setError(''); setMissingProject(false); setBundle(null);
-    listProjects()
-      .then(async all => {
+    Promise.all([listProjects(), listTrashedProjects()])
+      .then(async ([all, trashed]) => {
         if (!active) return;
-        setProjects(all); setReadWarning('');
+        setProjects(all); setTrashedProjects(trashed); setReadWarning('');
         if (route.id && !all.some(item => item.id === route.id)) {
           setMissingProject(true);
           return;
@@ -125,7 +134,40 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
       .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : '读取项目失败'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [route.id]);
+  }, [route.id, route.section === 'trash']);
+
+  function openProjectAction(type: ProjectAction['type'], target: Project) {
+    setActionError('');
+    setProjectAction({type, project: target});
+  }
+
+  async function confirmProjectAction(options: {name: string; keepQuestions: boolean}) {
+    if (!projectAction || actionBusy) return;
+    setActionBusy(true); setActionError('');
+    try {
+      let next: Project | null = null;
+      if (projectAction.type === 'restart') next = await restartProject(projectAction.project.id, options);
+      else await trashProject(projectAction.project.id);
+      dirty.current = false;
+      window.dispatchEvent(new CustomEvent('formal-dirty', {detail: false}));
+      setProjectAction(null);
+      go(next?.id ?? null, next ? 'setup' : 'overview');
+      await refresh();
+      notify(next ? `已创建新草稿${options.keepQuestions ? '，题库可继续编辑' : '，请重新导入题库'}；原项目已保留。` : '项目已移入回收站，评分与素材仍保留，可随时恢复。');
+    } catch (reason) { setActionError(reason instanceof Error ? reason.message : '操作失败，原项目保持不变'); }
+    finally { setActionBusy(false); }
+  }
+
+  async function restoreFromTrash(id: string) {
+    if (restoringProjectId) return;
+    setRestoringProjectId(id);
+    try {
+      await restoreTrashedProject(id);
+      await refresh();
+      notify('项目已恢复，原有评分、素材和配置状态保持不变。');
+    } catch (reason) { notify(reason instanceof Error ? reason.message : '恢复失败，请重试'); }
+    finally { setRestoringProjectId(null); }
+  }
 
   async function create() {
     if (!newName.trim()) { notify('请填写项目名称'); return; }
@@ -157,6 +199,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   }
 
   const project = bundle?.project;
+  const selectedTrashed = trashedProjects.find(item => item.project.id === route.id);
   const locked = project?.status === 'active' || Boolean(bundle?.evaluations.some(record => record.status === 'submitted'));
   const formalCount = projects.length;
 
@@ -188,9 +231,18 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
       </header>
       <main className="main-content formal-main">
         {readWarning && <div className="formal-note" role="alert"><AlertCircle size={16}/>{readWarning}</div>}
-        {missingProject ? <section className="panel formal-empty"><FolderOpen size={36}/><h2>当前浏览器没有这个项目</h2><p>项目保存在创建它的浏览器中，分享网址不会同步项目数据。你可以先查看界面演示，或导入收到的项目包继续评测。</p><div className="formal-entry-actions"><button className="btn btn-primary" onClick={onDemo}>查看界面演示<ArrowRight size={15}/></button><button className="btn" onClick={() => go(null)}>返回我的项目</button><button className="btn" onClick={() => go(null, 'sync')}><Upload size={15}/>导入项目包</button></div></section>
+        {selectedTrashed ? <section className="panel formal-empty"><Trash2 size={36}/><h2>这个项目已移入回收站</h2><p>“{selectedTrashed.project.name}”的评分、素材和历史记录仍保留。恢复项目后可继续查看和评测。</p><div className="formal-entry-actions"><button className="btn btn-primary" disabled={!!restoringProjectId} onClick={() => void restoreFromTrash(selectedTrashed.project.id)}><RotateCcw size={15}/>{restoringProjectId ? '恢复中…' : '恢复这个项目'}</button><button className="btn" onClick={() => go(null, 'trash')}>查看回收站</button><button className="btn" onClick={() => go(null)}>返回我的项目</button></div></section>
+          : missingProject ? <section className="panel formal-empty"><FolderOpen size={36}/><h2>当前浏览器没有这个项目</h2><p>项目保存在创建它的浏览器中，分享网址不会同步项目数据。你可以先查看界面演示，或导入收到的项目包继续评测。</p><div className="formal-entry-actions"><button className="btn btn-primary" onClick={onDemo}>查看界面演示<ArrowRight size={15}/></button><button className="btn" onClick={() => go(null)}>返回我的项目</button><button className="btn" onClick={() => go(null, 'sync')}><Upload size={15}/>导入项目包</button></div></section>
           : error ? <section className="panel formal-empty"><AlertCircle size={28}/><h2>暂时无法打开项目</h2><p>{error}</p><div className="formal-entry-actions"><button className="btn" onClick={() => go(null)}>返回项目列表</button><button className="btn" onClick={onDemo}>查看界面演示</button></div></section>
           : loading ? <div className="empty-state"><LoaderCircle size={26} className="spin"/>正在读取本机项目…</div>
+          : route.section === 'trash' ? <>
+            <PageHeading eyebrow="PROJECT RECYCLE BIN" title="项目回收站" description="移入回收站的项目保留全部评分、素材和历史记录，可恢复到我的项目。" action={<button className="btn" onClick={() => go(null)}><ArrowLeft size={15}/>返回我的项目</button>}/>
+            <div className="formal-note"><ShieldCheck size={16}/>这里只管理当前浏览器中的项目。回收站不会释放图片存储空间，也不会删除其他评测员的副本。</div>
+            {trashedProjects.length ? <div className="formal-trash-list">{trashedProjects.map(item => <article className="panel formal-trash-card" key={item.project.id}>
+              <span className="formal-project-icon"><FolderOpen size={22}/></span><div><h2>{item.project.name}</h2><p>{item.project.questions.length} 道题 · 移入于 {new Date(item.trashedAt).toLocaleString('zh-CN')}</p><small>恢复后保留原来的配置锁定；需要重新导入题库，可恢复后选择“重新开始”。</small></div>
+              <button className="btn" disabled={!!restoringProjectId} onClick={() => void restoreFromTrash(item.project.id)}><RotateCcw size={15}/>{restoringProjectId === item.project.id ? '恢复中…' : '恢复项目'}</button>
+            </article>)}</div> : <section className="panel formal-empty"><Trash2 size={36}/><h2>回收站是空的</h2><p>移入回收站的项目会显示在这里，可以随时恢复。</p><button className="btn" onClick={() => go(null)}>返回我的项目</button></section>}
+          </>
           : route.section === 'archive' ? <ArchiveWorkspace key={route.id ?? 'all'} bundle={bundle} onToast={notify}/>
           : route.section === 'independent' ? <IndependentPortal onToast={notify}/>
           : route.section === 'sync' ? <StageSync bundle={bundle} onRefresh={refresh} onToast={notify} onImported={id => {
@@ -201,15 +253,18 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
           }}/>
           : !project || !bundle ? <>
             <PageHeading eyebrow="YOUR PROJECTS" title="开始一次真正的评测" description="创建独立项目，导入你的题目和素材，所有指标从实际记录计算。"
-              action={<><button className="btn" onClick={() => go(null, 'independent')}><ShieldCheck size={15}/>独立评审空间</button><button className="btn" onClick={() => go(null, 'sync')}><FolderSync size={15}/>导入阶段包</button><button className="btn" disabled={restoring} onClick={() => restoreInput.current?.click()}><Upload size={15}/>{restoring ? '检查备份中…' : '恢复 JSON 备份'}</button><button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={16}/>新建正式项目</button></>}/>
+              action={<><button className="btn" onClick={() => go(null, 'trash')}><Trash2 size={15}/>回收站{trashedProjects.length ? `（${trashedProjects.length}）` : ''}</button><button className="btn" onClick={() => go(null, 'independent')}><ShieldCheck size={15}/>独立评审空间</button><button className="btn" onClick={() => go(null, 'sync')}><FolderSync size={15}/>导入阶段包</button><button className="btn" disabled={restoring} onClick={() => restoreInput.current?.click()}><Upload size={15}/>{restoring ? '检查备份中…' : '恢复 JSON 备份'}</button><button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={16}/>新建正式项目</button></>}/>
             <div className="formal-note"><InfoIcon/>三位评测员使用同一个准备包，各自保存后导出初评包，由负责人在“阶段同步”检查并合并。<button className="formal-breadcrumb-link" onClick={onDemo}>先看界面演示 →</button></div>
             {!projects.length ? <section className="panel formal-empty"><FolderOpen size={40}/><h2>还没有正式项目</h2><p>演示题和模拟分数不会复制进来。创建后先补齐产品信息，再导入真实题库。</p><button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={15}/>创建第一个项目</button></section>
-              : <div className="formal-project-grid">{projects.map(item => <button className="panel formal-project-card" key={item.id} onClick={() => go(item.id)}>
+              : <div className="formal-project-grid">{projects.map(item => <article className="panel formal-project-card" key={item.id}>
+                <button className="formal-project-open" onClick={() => go(item.id)} aria-label={`打开项目 ${item.name}`}>
                 <span className="formal-project-icon"><FolderOpen size={22}/></span><Pill tone={item.status === 'active' ? 'green' : 'neutral'}>{item.status === 'active' ? '评测中' : '配置草稿'}</Pill>
                 <h2>{item.name}</h2><p>{item.background || '项目背景待填写'}</p>
                 <div><span>{item.products.filter(product => !product.demo).length} 个真实产品</span><span>{item.questions.length} 道题</span></div>
                 <footer>本机更新 {new Date(item.updatedAt).toLocaleString('zh-CN')}<ArrowRight size={15}/></footer>
-              </button>)}</div>}
+                </button>
+                <div className="formal-project-actions"><button className="btn btn-small" onClick={() => openProjectAction('restart', item)} aria-label={`重新开始项目 ${item.name}`}><RotateCcw size={14}/>重新开始</button><button className="btn btn-small formal-trash-button" onClick={() => openProjectAction('trash', item)} aria-label={`移入回收站 ${item.name}`}><Trash2 size={14}/>移入回收站</button></div>
+              </article>)}</div>}
           </>
           : <>
             <div className="formal-context"><span><span className="formal-status-dot"/>{locked ? '规则已冻结 · 提交修订保留历史' : '配置草稿 · 可先用少量题演练'}</span><span>{project.questions.length} / {project.expectedQuestionCount} 道题 · 项目修订 {project.revision}</span></div>
@@ -219,7 +274,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
               try { if (project.status !== 'active') await updateProject({ ...project, status: 'active' }); go(project.id, 'evaluation'); }
               catch (reason) { notify(reason instanceof Error ? reason.message : '无法开始评测'); }
             }}/> }
-            {route.section === 'setup' && <ProjectSetup key={project.id} project={project} locked={locked} onSave={updateProject} onToast={notify}/>}
+            {route.section === 'setup' && <ProjectSetup key={project.id} project={project} locked={locked} onSave={updateProject} onToast={notify} onRestart={() => openProjectAction('restart', project)} onTrash={() => openProjectAction('trash', project)}/>}
             {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onSave={async (record, assets) => {
               await saveEvaluation(project.id, record, assets);
               await refresh();
@@ -239,6 +294,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
       </main>
     </div>
     <input ref={restoreInput} type="file" accept="application/json,.json" hidden onChange={event => void restore(event.target.files?.[0])}/>
+    {projectAction && <ProjectLifecycleDialog key={`${projectAction.type}:${projectAction.project.id}`} action={projectAction} busy={actionBusy} error={actionError} hasUnsavedChanges={dirty.current} onClose={() => { if (!actionBusy) setProjectAction(null); }} onConfirm={options => void confirmProjectAction(options)}/>}
     {toast && <div className="toast" role="status"><InfoIcon/><span>{toast}</span><button aria-label="关闭提示" onClick={() => setToast('')}><X size={15}/></button></div>}
     {createOpen && <div className="modal-backdrop" onClick={() => { if (!creating) setCreateOpen(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="formal-create-title" onClick={event => event.stopPropagation()}>
       <button className="modal-close icon-button" aria-label="关闭新建项目" disabled={creating} onClick={() => setCreateOpen(false)}><X size={18}/></button>

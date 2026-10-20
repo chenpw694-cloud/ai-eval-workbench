@@ -4,6 +4,7 @@ import type { QualityState } from '../core/quality';
 import { validateQualityExtension } from '../core/quality';
 import { buildStagePackage, readStagePackage } from '../core/packages';
 import { canonical, getAsset, getProjectBundle, listProjects, openDatabase } from './projects';
+import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
 export type ReviewSpace = { id: string; bundle: ProjectBundle; blobs: { hash: string; blob: Blob }[] };
 const read = <T,>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
@@ -13,11 +14,13 @@ export async function saveQuality(bundle: ProjectBundle, state: QualityState) {
   if (errors.length) throw new Error(errors.join('；'));
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['projects', 'qualityStates', 'snapshots'], 'readwrite');
+    const tx = db.transaction(['projects', 'qualityStates', 'snapshots', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
+    const trashed = tx.objectStore(PROJECT_TRASH_STORE).get(bundle.project.id);
     const projectRequest = tx.objectStore('projects').get(bundle.project.id);
     const current = tx.objectStore('qualityStates').get(bundle.project.id);
     current.onsuccess = () => {
+      if (trashed.result) { failure = new Error(PROJECT_TRASH_MESSAGE); tx.abort(); return; }
       if (canonical(current.result?.state ?? emptyQuality()) !== canonical(bundle.quality ?? emptyQuality())) {
         failure = new Error('质检数据已在其他页面更新，请重新打开后再保存'); tx.abort(); return;
       }
@@ -35,8 +38,11 @@ export async function saveQuality(bundle: ProjectBundle, state: QualityState) {
   });
 }
 export async function exportIndependent(bundle: ProjectBundle, batchId: string, reviewerId: string, returning = false, loader = getAsset) {
+  if (!bundle.quality?.space) await getProjectBundle(bundle.project.id);
   const projected = blindQualityBundle(bundle, batchId, reviewerId, returning);
-  return buildStagePackage({ bundle: projected, snapshots: [projected.project], kind: 'baseline', senderId: reviewerId, productIds: projected.project.products.map(row => row.id) }, loader);
+  const packaged = await buildStagePackage({ bundle: projected, snapshots: [projected.project], kind: 'baseline', senderId: reviewerId, productIds: projected.project.products.map(row => row.id) }, loader);
+  if (!bundle.quality?.space) await getProjectBundle(bundle.project.id);
+  return packaged;
 }
 export async function listReviewSpaces(): Promise<ReviewSpace[]> {
   const db = await openDatabase();

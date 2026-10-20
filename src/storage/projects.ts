@@ -4,6 +4,7 @@ import type { Asset, AssetMetadata, Evaluation, Experience, Project, ProjectBund
 import { latestEvaluations, validateEvaluation } from '../core/assessment';
 import { validateBackupStructure } from '../core/backup';
 import { frozenConfigurationMatches } from '../core/projectEditing';
+import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
 const DATABASE = 'eval-studio-formal-projects';
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -12,10 +13,11 @@ let connection: Promise<IDBDatabase> | undefined;
 export function openDatabase(): Promise<IDBDatabase> {
   if (!connection) {
     connection = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DATABASE, 4);
+      const request = indexedDB.open(DATABASE, 5);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(PROJECT_TRASH_STORE)) db.createObjectStore(PROJECT_TRASH_STORE, { keyPath: 'id' });
         if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'id' }).createIndex('projectId', 'projectId');
         for (const name of ['evaluations', 'assets', 'walkthroughs', 'experiences']) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' }).createIndex('projectId', 'projectId');
@@ -60,8 +62,13 @@ export async function digest(value: string | ArrayBuffer): Promise<string> {
 
 export async function listProjects(): Promise<Project[]> {
   const db = await openDatabase();
-  const projects = await requestValue<Project[]>(db.transaction('projects').objectStore('projects').getAll());
-  return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const transaction = db.transaction(['projects', PROJECT_TRASH_STORE]);
+  const [projects, trashed] = await Promise.all([
+    requestValue<Project[]>(transaction.objectStore('projects').getAll()),
+    requestValue<{id: string}[]>(transaction.objectStore(PROJECT_TRASH_STORE).getAll())
+  ]);
+  const hidden = new Set(trashed.map(row => row.id));
+  return projects.filter(project => !hidden.has(project.id)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function createProject(name: string): Promise<Project> {
@@ -95,12 +102,14 @@ export async function saveProject(input: Project): Promise<Project> {
   const questionsHash = await digest(canonical(input.questions));
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['projects', 'snapshots', 'evaluations'], 'readwrite');
+    const transaction = db.transaction(['projects', 'snapshots', 'evaluations', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
     let saved: Project;
+    const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(input.id);
     const projects = transaction.objectStore('projects');
     const existingRequest = projects.get(input.id);
     existingRequest.onsuccess = () => {
+      if (trashed.result) { failure = new Error(PROJECT_TRASH_MESSAGE); transaction.abort(); return; }
       const existing = existingRequest.result as Project | undefined;
       if (existing && input.revision !== existing.revision) {
         failure = new Error('项目已在另一个页面更新，请重新打开后再修改'); transaction.abort(); return;
@@ -132,18 +141,20 @@ export async function saveProject(input: Project): Promise<Project> {
   });
 }
 
-export async function getProjectBundle(projectId: string): Promise<ProjectBundle> {
+export async function getProjectBundle(projectId: string, options: { includeTrashed?: boolean } = {}): Promise<ProjectBundle> {
   const db = await openDatabase();
-  const transaction = db.transaction(['projects', 'evaluations', 'assets', 'walkthroughs', 'experiences', 'qualityStates']);
-  const [project, evaluations, assets, walkthroughs, experiences, qualityRow] = await Promise.all([
+  const transaction = db.transaction(['projects', 'evaluations', 'assets', 'walkthroughs', 'experiences', 'qualityStates', PROJECT_TRASH_STORE]);
+  const [project, evaluations, assets, walkthroughs, experiences, qualityRow, trashed] = await Promise.all([
     requestValue<Project | undefined>(transaction.objectStore('projects').get(projectId)),
     requestValue<Evaluation[]>(transaction.objectStore('evaluations').index('projectId').getAll(projectId)),
     requestValue<AssetMetadata[]>(transaction.objectStore('assets').index('projectId').getAll(projectId)),
     requestValue<Walkthrough[]>(transaction.objectStore('walkthroughs').index('projectId').getAll(projectId)),
     requestValue<Experience[]>(transaction.objectStore('experiences').index('projectId').getAll(projectId)),
-    requestValue<{id:string; state:import('../core/quality').QualityState}|undefined>(transaction.objectStore('qualityStates').get(projectId))
+    requestValue<{id:string; state:import('../core/quality').QualityState}|undefined>(transaction.objectStore('qualityStates').get(projectId)),
+    requestValue<{id: string}|undefined>(transaction.objectStore(PROJECT_TRASH_STORE).get(projectId))
   ]);
   if (!project) throw new Error('未找到该项目，请选择本机项目或恢复备份');
+  if (trashed && !options.includeTrashed) throw new Error(PROJECT_TRASH_MESSAGE);
   return { project, evaluations, assets, walkthroughs, experiences, ...(qualityRow ? { quality: qualityRow.state } : {}) };
 }
 
@@ -191,10 +202,12 @@ export async function saveEvaluation(projectId: string, record: Evaluation, newA
     }
   }
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['projects', 'evaluations', 'assets', 'blobs'], 'readwrite');
+    const transaction = db.transaction(['projects', 'evaluations', 'assets', 'blobs', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
+    const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(projectId);
     const projects = transaction.objectStore('projects').get(projectId);
     projects.onsuccess = () => {
+      if (trashed.result) { failure = new Error(PROJECT_TRASH_MESSAGE); transaction.abort(); return; }
       const project = projects.result as Project | undefined;
       if (!project || record.projectId !== projectId || record.schemeHash !== project.schemeHash || record.questionsHash !== project.questionsHash) {
         failure = new Error('项目规则或题库已变化，请重新打开题目确认后保存'); transaction.abort(); return;
@@ -235,11 +248,19 @@ export async function saveEvaluation(projectId: string, record: Evaluation, newA
 export async function saveWalkthroughs(projectId: string, walkthroughs: Walkthrough[], experiences: Experience[]): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['walkthroughs', 'experiences'], 'readwrite');
-    for (const item of walkthroughs) transaction.objectStore('walkthroughs').put({ ...item, projectId });
-    for (const item of experiences) transaction.objectStore('experiences').put({ ...item, projectId, id: `${projectId}:${item.productId}` });
+    const transaction = db.transaction(['projects', 'walkthroughs', 'experiences', PROJECT_TRASH_STORE], 'readwrite');
+    let failure: Error | undefined;
+    const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(projectId);
+    const project = transaction.objectStore('projects').get(projectId);
+    project.onsuccess = () => {
+      if (trashed.result || !project.result) {
+        failure = new Error(trashed.result ? PROJECT_TRASH_MESSAGE : '未找到该项目'); transaction.abort(); return;
+      }
+      for (const item of walkthroughs) transaction.objectStore('walkthroughs').put({ ...item, projectId });
+      for (const item of experiences) transaction.objectStore('experiences').put({ ...item, projectId, id: `${projectId}:${item.productId}` });
+    };
     transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error ?? new Error('走查保存失败'));
+    transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('走查保存失败'));
   });
 }
 
@@ -260,7 +281,7 @@ function toBase64(blob: Blob): Promise<string> {
 }
 
 export async function exportProject(projectId: string): Promise<FormalBackup> {
-  const bundle = await getProjectBundle(projectId);
+  const bundle = await getProjectBundle(projectId, { includeTrashed: true });
   const uniqueAssets = [...new Map(bundle.assets.map(asset => [asset.sha256, asset])).values()];
   const bytes = uniqueAssets.reduce((total, asset) => total + asset.size, 0);
   if (bytes > 75 * 1024 * 1024) throw new Error('当前 JSON 完整备份适用于 75 MB 内的项目；请保留原图，下一阶段将提供 ZIP 分包');
@@ -304,10 +325,12 @@ export async function restoreProject(raw: unknown): Promise<Project> {
   }
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces'], 'readwrite');
+    const transaction = db.transaction(['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
+    const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(bundle.project.id);
     const spaceCheck = transaction.objectStore('qualitySpaces').getAll();
     spaceCheck.onsuccess = () => {
+      if (trashed.result) { failure = new Error(PROJECT_TRASH_MESSAGE); transaction.abort(); return; }
       if (spaceCheck.result.some((space: {bundle:ProjectBundle}) => space.bundle.project.id === bundle.project.id)) { failure = new Error('独立评审空间不能恢复完整主包，请更换浏览器配置'); transaction.abort(); return; }
       const existing = transaction.objectStore('projects').get(bundle.project.id);
       existing.onsuccess = () => {

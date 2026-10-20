@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import {
   AlertCircle, CheckCircle2, ChevronDown, Download, FileJson, FileSpreadsheet,
-  Info, LockKeyhole, Pencil, Plus, Save, Search, ShieldCheck, Trash2, Upload, X
+  Info, LockKeyhole, Pencil, Plus, RotateCcw, Save, Search, ShieldCheck, Trash2, Upload, X
 } from 'lucide-react';
 import type { Member, Product, ProductRole, Project, Question, Scheme } from '../core/model.ts';
 import { parseCsv, parseQuestionsJson, questionsFromRows } from '../core/questions.ts';
@@ -16,6 +16,8 @@ type Props = {
   locked: boolean;
   onSave: (project: Project) => Promise<void>;
   onToast: (message: string) => void;
+  onRestart: () => void;
+  onTrash: () => void;
 };
 
 type SetupTab = 'project' | 'questions' | 'rules';
@@ -102,7 +104,7 @@ function Notice({ children, tone = 'info' }: { children: React.ReactNode; tone?:
   </div>;
 }
 
-export default function ProjectSetup({ project, locked, onSave, onToast }: Props) {
+export default function ProjectSetup({ project, locked, onSave, onToast, onRestart, onTrash }: Props) {
   const [tab, setTab] = useState<SetupTab>('project');
   const [draft, setDraft] = useState<Project>(() => structuredClone(project));
   const [saving, setSaving] = useState(false);
@@ -361,6 +363,8 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
       title="项目配置"
       description="填写真实产品、导入自己的题库，并确认本次评测使用的规则快照。"
       action={<>
+        <button className="btn" disabled={saving} onClick={onRestart}><RotateCcw size={15}/>重新开始</button>
+        <button className="btn formal-trash-button" disabled={saving} onClick={onTrash}><Trash2 size={15}/>移入回收站</button>
         <button className="btn" disabled={saving || !dirty} onClick={() => { setDraft(structuredClone(project)); setSaveError(''); }}>撤销修改</button>
         <button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '项目配置已保存到本地')}>
           <Save size={15} />{saving ? '保存中…' : '保存配置'}
@@ -377,6 +381,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast }: Props
 
     {locked && <Notice tone="warning">
       <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景和周期；成员、产品、题目、权重及评分政策保持当前快照。{project.status === 'draft' && <> 尚未分发的项目，允许补填原本空白的产品名称或版本；已填写的身份信息保持锁定。</>}
+      <div className="formal-locked-restart"><span>需要重新导入题库？保留旧项目，创建一份可编辑的新草稿。</span><button className="btn btn-small" disabled={saving} onClick={onRestart}><RotateCcw size={14}/>重新开始</button></div>
     </Notice>}
 
     {saveError && <div className="setup-error" role="alert"><AlertCircle size={16} />{saveError}</div>}

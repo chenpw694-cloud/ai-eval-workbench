@@ -2,6 +2,7 @@ import type { AssetMetadata, Evaluation, Experience, Project, ProjectBundle, Sta
 import type { ArchiveInput, ArchiveRecord, ArchiveSource } from '../core/archive';
 import { archiveContentHash, buildFinalArchive, readFinalArchive } from '../core/archive';
 import { canonical, getAsset, openDatabase } from './projects';
+import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
 const stores=['projects','evaluations','assets','walkthroughs','experiences','qualityStates','snapshots','stageReceipts'];
 const read=<T,>(request:IDBRequest<T>)=>new Promise<T>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
@@ -19,7 +20,10 @@ function materialize(r:ReturnType<typeof requests>):ArchiveSource {
   return {bundle,snapshots:r.snapshots.result.map((row:{project:Project})=>row.project),audits:r.audits.result as StageAudit[]};
 }
 export async function readArchiveSource(projectId:string):Promise<ArchiveSource>{
-  const db=await openDatabase(),tx=db.transaction(stores),r=requests(tx,projectId);await Promise.all(Object.values(r).map(request=>read(request)));return materialize(r);
+  const db=await openDatabase(),tx=db.transaction([...stores,PROJECT_TRASH_STORE]),r=requests(tx,projectId);
+  const trashed=tx.objectStore(PROJECT_TRASH_STORE).get(projectId);
+  await Promise.all([...Object.values(r),trashed].map(request=>read(request)));
+  if(trashed.result)throw new Error(PROJECT_TRASH_MESSAGE);return materialize(r);
 }
 function token(source:ArchiveSource){
   return canonical({...source,bundle:{...source.bundle,evaluations:[...source.bundle.evaluations].sort((a,b)=>a.id.localeCompare(b.id)),assets:[...source.bundle.assets].sort((a,b)=>a.id.localeCompare(b.id))},snapshots:[...source.snapshots].sort((a,b)=>a.revision-b.revision),audits:[...source.audits].sort((a,b)=>a.id.localeCompare(b.id))});
@@ -33,13 +37,15 @@ export async function listArchives(projectId?:string):Promise<ArchiveRecord[]>{
 async function persist(record:ArchiveRecord,source?:ArchiveSource):Promise<ArchiveRecord>{
   const db=await openDatabase();
   return new Promise((resolve,reject)=>{
-    const tx=db.transaction(['archives','qualitySpaces',...(source?stores:[])],'readwrite');
+    const tx=db.transaction(['archives','qualitySpaces',...(source?[...stores,PROJECT_TRASH_STORE]:[])],'readwrite');
     let failure:Error|undefined,output=record;
     const abort=(message:string)=>{failure=new Error(message);tx.abort();};
     const spaces=tx.objectStore('qualitySpaces').getAll(),prior=tx.objectStore('archives').get(record.id);
     const src=source?requests(tx,record.projectId):null;
-    const pending=[spaces,prior,...(src?Object.values(src):[])];let remaining=pending.length;
+    const trashed=source?tx.objectStore(PROJECT_TRASH_STORE).get(record.projectId):null;
+    const pending=[spaces,prior,...(src?Object.values(src):[]),...(trashed?[trashed]:[])];let remaining=pending.length;
     const done=()=>{if(--remaining)return;
+      if(trashed?.result){abort(PROJECT_TRASH_MESSAGE);return;}
       if(spaces.result.some((space:{bundle:ProjectBundle})=>space.bundle.project.id===record.projectId)){abort('此站点已有该项目的独立评审空间，不能存入包含原评分的归档。请使用负责人浏览器配置。');return;}
       if(source&&src){try{if(token(materialize(src))!==token(source)){abort('归档生成期间项目或审计已变化，请刷新后重新生成；旧归档保持不变。');return;}}catch(error){abort(error instanceof Error?error.message:'源项目读取失败');return;}}
       if(prior.result){if(prior.result.manifest.manifestHash!==record.manifest.manifestHash){abort('归档 ID 已存在但内容不同，不能覆盖原版本。');return;}output=prior.result;return;}

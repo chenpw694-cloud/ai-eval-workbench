@@ -6,6 +6,7 @@ import type { StagePackage } from '../core/packages';
 import { mergeSnapshotHistory } from '../core/snapshots';
 import { latestEvaluations, validateEvaluation, validateProject } from '../core/assessment';
 import { canonical, getAsset, getProjectBundle, openDatabase, saveProject } from './projects';
+import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
 export type StageReceipt = StageAudit;
 export type StageInspection = {
@@ -16,7 +17,7 @@ const requestValue = <T,>(request: IDBRequest<T>) => new Promise<T>((resolve, re
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
 });
-const storeNames = ['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces'];
+const storeNames = ['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', PROJECT_TRASH_STORE];
 
 function readBundle(transaction: IDBTransaction, projectId: string, done: (bundle: ProjectBundle | null) => void) {
   const keys = ['evaluations', 'assets', 'walkthroughs', 'experiences'] as const;
@@ -91,6 +92,8 @@ export async function exportStage(projectId: string, kind: Kind, senderId: strin
   const audits = kind === 'baseline' ? await listStageReceipts(projectId) : [];
   const exported = await buildStagePackage({ bundle, snapshots, kind, senderId, productIds, audits }, getAsset);
   if (originalProject.status !== 'active') await saveProject({ ...originalProject, status: 'active' });
+  // A different tab can move an already-active project to trash while packaging images.
+  else await getProjectBundle(projectId);
   return exported;
 }
 
@@ -149,8 +152,10 @@ export async function commitStage(inspection: StageInspection, options: {
     let failure: Error | undefined;
     let duplicate = false;
     const abort = (message: string) => { failure = new Error(message); transaction.abort(); };
+    const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(projectId);
     const spaceCheck = transaction.objectStore('qualitySpaces').getAll();
     spaceCheck.onsuccess = () => {
+      if (trashed.result) { abort(PROJECT_TRASH_MESSAGE); return; }
       if ((spaceCheck.result as {bundle:ProjectBundle}[]).some(space => space.bundle.project.id === projectId)) { abort('独立评审空间不能接收完整主包，请更换浏览器配置'); return; }
       const priorReceipt = transaction.objectStore('stageReceipts').index('projectId').getAll(projectId);
       priorReceipt.onsuccess = () => {
