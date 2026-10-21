@@ -203,7 +203,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   const locked = project?.status === 'active' || Boolean(bundle?.evaluations.some(record => record.status === 'submitted'));
   const formalCount = projects.length;
 
-  return <div className="app-shell formal-workspace">
+  return <div className={`app-shell formal-workspace${route.section === 'evaluation' && bundle && !loading && !error && !selectedTrashed ? ' formal-evaluation-workspace' : ''}`}>
     <aside className="sidebar">
       <button className="brand" onClick={() => go(null)} aria-label="正式项目列表">
         <span className="brand-mark"><Layers3 size={23}/></span>

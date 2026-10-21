@@ -46,6 +46,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const [productId, setProductId] = useState(project.products[0]?.id ?? '');
   const [reviewerId, setReviewerId] = useState('');
   const [search, setSearch] = useState('');
+  const [briefExpanded, setBriefExpanded] = useState(() => !latestEvaluations(bundle.evaluations).find(record => record.projectId === project.id && record.questionId === questionId && record.productId === productId)?.mediaIds.length);
   const [outputs, setOutputs] = useState<Asset[]>([]);
   const [references, setReferences] = useState<Asset[]>([]);
   const [pendingAssets, setPendingAssets] = useState<Asset[]>([]);
@@ -71,6 +72,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const referenceInput = useRef<HTMLInputElement>(null);
   const referenceTarget = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const evidenceRef = useRef<HTMLElement>(null);
+  const ratingScrollRef = useRef<HTMLDivElement>(null);
   const urls = useRef(new Map<string, string>());
   const dirtyRef = useRef(false);
   const pendingRef = useRef(false);
@@ -152,6 +155,9 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     setLoadError('');
     setErrors([]);
     setLoading(true);
+    setBriefExpanded(!record?.mediaIds.length);
+    if (evidenceRef.current) evidenceRef.current.scrollTop = 0;
+    if (ratingScrollRef.current) ratingScrollRef.current.scrollTop = 0;
     setReviewerId(record?.reviewerId ?? (current.project.members.some(member => member.id === selectedProduct?.ownerId) ? selectedProduct?.ownerId ?? '' : ''));
     setBestMediaId(record?.bestMediaId ?? null);
     setMediaChecks(record?.mediaChecks.map(check => ({ ...check })) ?? []);
@@ -242,6 +248,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       if (version !== readVersion.current) return;
       setPendingAssets(previous => [...previous, ...uploaded]);
       if (role === 'output') {
+        setBriefExpanded(false);
         setOutputs(previous => [...previous, ...uploaded]);
         setMediaChecks(previous => [...previous, ...uploaded.map(asset => ({ mediaId: asset.id, usable: null, infringement: null }))]);
         if (!activeMediaId) setActiveMediaId(uploaded[0].id);
@@ -359,7 +366,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     <div className="formal-layout" aria-busy={loading || busy}>
       <aside className="panel formal-questions">
         <div className="formal-question-top"><div className="formal-section-title"><h2>评测题目</h2><span>{project.questions.length}</span></div>
-          <div className="formal-progress-label"><span>当前产品已提交</span><strong>{completed}<small> / {project.questions.length}</small></strong></div>
+          <div className="formal-progress-label"><span>当前产品已提交</span><strong aria-label={`当前产品已提交 ${completed} / ${project.questions.length} 题`}>{completed}<small> / {project.questions.length}</small></strong></div>
           <div className="formal-progress"><span style={{ width: `${completed / project.questions.length * 100}%` }} /></div>
           <label className="formal-search"><Search size={14} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索题号、场景" aria-label="搜索评测题目" /></label>
         </div>
@@ -374,8 +381,10 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         <footer>切换题目、产品前请保存修改</footer>
       </aside>
 
-      <section className="formal-evidence">
-        <div className="panel formal-brief">
+      <section className="formal-evidence" ref={evidenceRef} aria-label="题目与图片" tabIndex={0}>
+        <details className="panel formal-brief" open={briefExpanded}>
+          <summary className="formal-brief-toggle" onClick={event => { event.preventDefault(); setBriefExpanded(previous => !previous); }}><span><strong>题目与参考图</strong><small>{question.id} · {question.title}</small></span><ChevronRight size={16} /></summary>
+          <div className="formal-brief-content">
           <div className="formal-brief-top"><span>QUESTION {String(position + 1).padStart(2, '0')} <small>/ {project.questions.length}</small></span><span className="pill">{question.id}</span></div>
           <h2>{question.title}</h2><div className="formal-meta"><span>{question.scene}</span><span>{question.category}</span><span>{question.difficulty}</span></div>
           <h3>需求描述</h3><p>{question.request || '尚未填写需求描述，请完善题库。'}</p>
@@ -389,7 +398,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
             return asset ? <button className="formal-reference" key={name} onClick={() => showImage(asset)}><img src={assetUrl(asset)} alt={name} /><span title={name}>{name}</span><CheckCircle2 size={12} /></button> : <button className="formal-reference missing" key={name} disabled={locked} onClick={() => { referenceTarget.current = name; if (referenceInput.current) { referenceInput.current.multiple = false; referenceInput.current.click(); } }}><Upload size={18} /><span title={name}>{name}</span><small>缺失 · 点击绑定原图</small></button>;
           })}{references.filter(asset => !question.referenceNames.includes(asset.name)).map(asset => <button className="formal-reference" key={asset.id} onClick={() => showImage(asset)}><img src={assetUrl(asset)} alt={asset.name} /><span title={asset.name}>{asset.name}</span></button>)}</div>
           {!question.referenceNames.length && !references.length && <p className="formal-help">本题没有指定参考图，可按需要补充。</p>}
-        </div>
+          </div>
+        </details>
 
         <div className="panel formal-results">
           <div className="formal-image-heading"><h3><ImageIcon size={16} />生成结果 <small>{outputs.length} 张原图</small></h3><button className="btn btn-small" disabled={locked} onClick={() => outputInput.current?.click()}><Upload size={14} />上传全部原图</button><input ref={outputInput} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => void upload(event.target.files, 'output')} /></div>
@@ -413,7 +423,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
 
       <aside className="panel formal-rating">
         <div className="formal-rating-header"><h2>评测记录</h2><span className={`formal-save-state ${cleanSubmitted ? 'submitted' : ''}`}>{loading ? '读取中' : busy ? '处理中' : dirty ? '未保存' : cleanSubmitted ? '已提交' : savedRevision ? '已存草稿' : '待评测'}</span></div>
-        <div className="formal-rating-scroll"><fieldset disabled={locked}>
+        <div className="formal-rating-scroll" ref={ratingScrollRef} role="region" aria-label="评分表单" tabIndex={0}><fieldset disabled={locked}>
           <label className="formal-field"><span>被测产品</span><select value={productId} onChange={event => navigate(questionId, event.target.value)}>{project.products.map((item, index) => <option key={item.id} value={item.id}>{item.name.trim() || `待配置产品 ${index + 1}`}{item.version ? ` · ${item.version}` : ''}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
           <label className="formal-field"><span>当前评测员 <small>本地身份</small></span><select value={reviewerId} onChange={event => { setReviewerId(event.target.value); edited(); }}><option value="">请选择评测员</option>{project.members.map(member => <option key={member.id} value={member.id}>{member.name}{product.ownerId === member.id ? ' · 产品负责人' : ''}</option>)}</select></label>
           <p className="formal-help">本地身份用于记录署名；同一产品、同一题目共同维护一条修订历史。</p>
@@ -453,8 +463,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           {loadError && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div>{loadError}</div></div>}
           {errors.length > 0 && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div><strong>请检查以下内容</strong><ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul></div></div>}
         </div>
-        <footer className="formal-rating-footer">
-          <button className="btn" disabled={locked} onClick={() => void persist('draft')}><Save size={15} />保存草稿</button>
+        <footer className={`formal-rating-footer${position < project.questions.length - 1 ? ' has-next' : ''}`}>
+          <button className="btn" aria-label="保存草稿" title="保存草稿" disabled={locked} onClick={() => void persist('draft')}><Save size={15} />保存草稿</button>
           <button className="btn btn-primary" disabled={locked} onClick={() => void persist('submitted', true)}>{busy ? '处理中…' : position === project.questions.length - 1 ? '提交评测' : '提交并下一题'}<ArrowRight size={15} /></button>
           {position < project.questions.length - 1 && <button className="btn formal-draft-next" disabled={locked} onClick={() => void persist('draft', true)}>保存草稿并下一题<ChevronRight size={15} /></button>}
           <p>暂时未填齐可保存草稿并继续，补齐后再提交。</p>
