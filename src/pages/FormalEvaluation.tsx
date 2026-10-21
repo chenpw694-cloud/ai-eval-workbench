@@ -1,5 +1,6 @@
 import AnchorRatings from '../components/AnchorRatings';
 import { isAnchorMode, questionDimensions } from '../core/ratings';
+import { resolveReferences } from '../core/references';
 import type { DimensionRatings } from '../core/model';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, Image as ImageIcon, Info, Maximize2, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
@@ -12,7 +13,7 @@ import './formal-evaluation.css';
 
 type Props = {
   bundle: ProjectBundle;
-  onSave: (record: Evaluation, newAssets: Asset[]) => Promise<void>;
+  onSave: (record: Evaluation, newAssets: Asset[], referenceChange?: { id: string; expectedHeadId: string | null; assetIds: string[] }) => Promise<void>;
   onToast: (message: string) => void;
   initialQuestionId?: string;
 };
@@ -49,6 +50,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const [briefExpanded, setBriefExpanded] = useState(() => !latestEvaluations(bundle.evaluations).find(record => record.projectId === project.id && record.questionId === questionId && record.productId === productId)?.mediaIds.length);
   const [outputs, setOutputs] = useState<Asset[]>([]);
   const [references, setReferences] = useState<Asset[]>([]);
+  const [referencePool, setReferencePool] = useState<AssetMetadata[]>([]);
   const [pendingAssets, setPendingAssets] = useState<Asset[]>([]);
   const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
   const [bestMediaId, setBestMediaId] = useState<string | null>(null);
@@ -71,6 +73,9 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const outputInput = useRef<HTMLInputElement>(null);
   const referenceInput = useRef<HTMLInputElement>(null);
   const referenceTarget = useRef<string | null>(null);
+  const referenceReplacement = useRef<string | null>(null);
+  const referenceHead = useRef<string | null>(null);
+  const initialReferenceIds = useRef<string[]>([]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const evidenceRef = useRef<HTMLElement>(null);
   const ratingScrollRef = useRef<HTMLDivElement>(null);
@@ -146,10 +151,14 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     const record = latestEvaluations(current.evaluations).find(item => item.projectId === current.project.id && item.questionId === questionId && item.productId === productId) ?? null;
     const selectedProduct = current.project.products.find(item => item.id === productId);
     const referenceMetadata = current.assets.filter(asset => asset.projectId === current.project.id && asset.questionId === questionId && asset.role === 'reference');
-    const ids = [...new Set([...(record?.mediaIds ?? []), ...referenceMetadata.map(asset => asset.id)])];
+    const referenceSelection = resolveReferences(current, questionId);
+    referenceHead.current = referenceSelection.head?.id ?? null;
+    initialReferenceIds.current = referenceSelection.assets.map(asset => asset.id);
+    const ids = [...new Set([...(record?.mediaIds ?? []), ...referenceSelection.assets.map(asset => asset.id)])];
     clearUrls();
     setOutputs([]);
     setReferences([]);
+    setReferencePool(referenceMetadata);
     setPendingAssets([]);
     setDialogAsset(null);
     setLoadError('');
@@ -178,10 +187,11 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       return asset;
     })).then(assets => {
       if (version !== readVersion.current) return;
+      if (referenceSelection.errors.length) throw new Error(referenceSelection.errors.join('；'));
       const byId = new Map(assets.map(asset => [asset.id, asset]));
       const nextOutputs = (record?.mediaIds ?? []).map(id => byId.get(id)!).filter(Boolean);
       setOutputs(nextOutputs);
-      setReferences(assets.filter(asset => asset.role === 'reference'));
+      setReferences(referenceSelection.assets.map(asset => byId.get(asset.id)!).filter(Boolean));
       setActiveMediaId(record?.bestMediaId ?? nextOutputs[0]?.id ?? null);
       if (!record?.bestMediaId && nextOutputs.length === 1) setBestMediaId(nextOutputs[0].id);
     }).catch(error => {
@@ -219,6 +229,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     if (!files?.length || !question || !product || busy || loading) return;
     const selected = Array.from(files);
     const targetName = role === 'reference' ? referenceTarget.current : null;
+    const replacedId = role === 'reference' ? referenceReplacement.current : null;
     const resetInput = () => {
       if (outputInput.current) outputInput.current.value = '';
       if (referenceInput.current) referenceInput.current.value = '';
@@ -253,9 +264,13 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         setMediaChecks(previous => [...previous, ...uploaded.map(asset => ({ mediaId: asset.id, usable: null, infringement: null }))]);
         if (!activeMediaId) setActiveMediaId(uploaded[0].id);
         if (outputs.length === 0 && uploaded.length === 1) setBestMediaId(uploaded[0].id);
-      } else setReferences(previous => [...previous, ...uploaded]);
+      } else {
+        const replacements = [...new Map(uploaded.map(asset => [asset.name, asset])).values()];
+        setReferences(previous => [...previous.filter(asset => asset.id !== replacedId && !replacements.some(item => item.name === asset.name)), ...replacements]);
+        setReferencePool(previous => [...previous, ...uploaded.map(({ blob: _blob, ...asset }) => asset)]);
+      }
       edited();
-      onToast(`已读取 ${uploaded.length} 张原图，保存后写入本机；请逐张检查。`);
+      onToast(role === 'reference' ? `已读取 ${uploaded.length} 张参考图，保存后生效。` : `已读取 ${uploaded.length} 张原图，保存后写入本机；请逐张检查。`);
     } catch (error) {
       if (version !== readVersion.current) return;
       const message = error instanceof Error ? error.message : '图片读取失败，请重新选择。';
@@ -265,6 +280,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       pendingRef.current = false;
       if (version === readVersion.current) setBusy(false);
       referenceTarget.current = null;
+      referenceReplacement.current = null;
       resetInput();
     }
   }
@@ -286,6 +302,41 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     dialogRef.current?.showModal();
   }
 
+  function chooseReference(name: string | null, replaceId: string | null = null) {
+    referenceTarget.current = name;
+    referenceReplacement.current = replaceId;
+    if (referenceInput.current) {
+      referenceInput.current.multiple = name === null;
+      referenceInput.current.click();
+    }
+  }
+
+  function removeReference(id: string) {
+    setReferences(previous => previous.filter(asset => asset.id !== id));
+    edited();
+    onToast('已移除本题参考图，保存后生效；已保存的图片可从“已移除参考图”恢复。');
+  }
+
+  async function readHistoricalReference(metadata: AssetMetadata, restore: boolean) {
+    if (busy || loading || loadError) return;
+    const version = readVersion.current;
+    setBusy(true);
+    try {
+      const asset = pendingAssets.find(item => item.id === metadata.id) ?? await getAsset(metadata.id);
+      if (version !== readVersion.current) return;
+      if (!asset) throw new Error('这张参考图的原始文件无法读取，请重新上传。');
+      if (restore) {
+        setReferences(previous => [...previous.filter(item => item.name !== asset.name), asset]);
+        edited();
+        onToast('参考图已恢复，保存后生效；同名位置使用恢复的图片。');
+      } else showImage(asset);
+    } catch (error) {
+      if (version === readVersion.current) onToast(error instanceof Error ? error.message : '参考图读取失败');
+    } finally {
+      if (version === readVersion.current) setBusy(false);
+    }
+  }
+
   async function persist(nextStatus: 'draft' | 'submitted', goNext = false) {
     if (!question || !product || loading || busy || loadError) return;
     if (seconds.trim() !== '' && (!Number.isFinite(Number(seconds)) || Number(seconds) < 0)) {
@@ -298,6 +349,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
       revision: (parent?.revision ?? 0) + 1, parentId: parent?.id ?? null,
       status: nextStatus, mediaIds: outputs.map(asset => asset.id), bestMediaId: outputs.length === 1 ? outputs[0].id : bestMediaId,
       mediaChecks: outputs.map(asset => mediaChecks.find(check => check.mediaId === asset.id) ?? { mediaId: asset.id, usable: null, infringement: null }),
+      referenceIds: references.map(asset => asset.id),
       ...(isAnchorMode(project.scheme) ? { ratings } : {}),
       tags: selectedTags.map(tag => ({ ...tag })), seconds: seconds.trim() === '' ? null : Number(seconds),
       failed, failureReason, notes, schemeHash: project.schemeHash, questionsHash: project.questionsHash,
@@ -320,7 +372,14 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     setBusy(true);
     setErrors([]);
     try {
-      await onSave(record, pendingAssets);
+      const referenceChange = JSON.stringify(initialReferenceIds.current) !== JSON.stringify(record.referenceIds)
+        ? { id: crypto.randomUUID(), expectedHeadId: referenceHead.current, assetIds: record.referenceIds! }
+        : undefined;
+      const retainedAssets = pendingAssets.filter(asset => asset.role === 'output' ? record.mediaIds.includes(asset.id) : record.referenceIds!.includes(asset.id));
+      await onSave(record, retainedAssets, referenceChange);
+      if (referenceChange) referenceHead.current = referenceChange.id;
+      initialReferenceIds.current = [...record.referenceIds!];
+      setReferencePool(previous => previous.filter(asset => bundle.assets.some(saved => saved.id === asset.id) || retainedAssets.some(saved => saved.id === asset.id)));
       setSavedRevision(record);
       setPendingAssets([]);
       setStatus(nextStatus);
@@ -355,6 +414,15 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const locked = loading || busy || !!loadError;
   const cleanSubmitted = status === 'submitted' && !dirty;
   const visibleAssets: AssetMetadata[] = [...references, ...outputs];
+  const removedReferences = referencePool.filter(asset => !references.some(active => active.id === asset.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+
+  function referenceCard(asset: Asset) {
+    return <div className="formal-reference-card" key={asset.id}>
+      <button className="formal-reference" onClick={() => showImage(asset)} aria-label={`查看参考图 ${asset.name}`}><img src={assetUrl(asset)} alt={asset.name} /><span title={asset.name}>{asset.name}</span></button>
+      <button className="formal-reference-remove" disabled={locked} onClick={() => removeReference(asset.id)} aria-label={`移除参考图 ${asset.name}`} title="移除参考图"><X size={15} /></button>
+      <div className="formal-reference-actions"><button disabled={locked} onClick={() => chooseReference(asset.name, asset.id)} aria-label={`替换参考图 ${asset.name}`}><Upload size={12} />替换</button></div>
+    </div>;
+  }
 
   return <div className="formal-page">
     <header className="page-heading formal-heading">
@@ -391,13 +459,15 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           <h3>验收要点</h3><ul className="formal-acceptance">{question.acceptance.map((item, index) => <li key={`${index}-${item}`}><CheckCircle2 size={14} /><span>{item}</span></li>)}</ul>
           {!question.acceptance.length && <p className="formal-help">尚未填写验收要点。</p>}
           {Object.keys(question.fields).length > 0 && <details className="formal-extra"><summary>更多题目字段</summary>{Object.entries(question.fields).map(([key, value]) => <p key={key}><strong>{key}</strong>：{value}</p>)}</details>}
-          <div className="formal-reference-heading"><h3>参考图 <small>{question.referenceNames.length ? `${question.referenceNames.length} 张要求` : '未指定'}</small></h3><button className="btn btn-small" disabled={locked} onClick={() => { referenceTarget.current = null; if (referenceInput.current) { referenceInput.current.multiple = true; referenceInput.current.click(); } }}><Upload size={13} />添加参考图</button></div>
+          <div className="formal-reference-heading"><h3>参考图 <small>{question.referenceNames.length ? `${question.referenceNames.length} 张要求` : '未指定'}</small></h3><button className="btn btn-small" disabled={locked} onClick={() => chooseReference(null)}><Upload size={13} />添加参考图</button></div>
+          <p className="formal-help">本题各产品共用参考图。鼠标移到图片上，点击右上角 × 可移除；修改后请保存。已保存的原图仍可恢复。</p>
           <input ref={referenceInput} type="file" accept={IMAGE_ACCEPT} multiple={!referenceTarget.current} hidden onChange={event => void upload(event.target.files, 'reference')} />
           <div className="formal-references">{question.referenceNames.map(name => {
             const asset = references.find(item => item.name === name);
-            return asset ? <button className="formal-reference" key={name} onClick={() => showImage(asset)}><img src={assetUrl(asset)} alt={name} /><span title={name}>{name}</span><CheckCircle2 size={12} /></button> : <button className="formal-reference missing" key={name} disabled={locked} onClick={() => { referenceTarget.current = name; if (referenceInput.current) { referenceInput.current.multiple = false; referenceInput.current.click(); } }}><Upload size={18} /><span title={name}>{name}</span><small>缺失 · 点击绑定原图</small></button>;
-          })}{references.filter(asset => !question.referenceNames.includes(asset.name)).map(asset => <button className="formal-reference" key={asset.id} onClick={() => showImage(asset)}><img src={assetUrl(asset)} alt={asset.name} /><span title={asset.name}>{asset.name}</span></button>)}</div>
+            return asset ? referenceCard(asset) : <button className="formal-reference missing" key={name} disabled={locked} onClick={() => chooseReference(name)}><Upload size={18} /><span title={name}>{name}</span><small>待上传 · 点击补充</small></button>;
+          })}{references.filter(asset => !question.referenceNames.includes(asset.name)).map(referenceCard)}</div>
           {!question.referenceNames.length && !references.length && <p className="formal-help">本题没有指定参考图，可按需要补充。</p>}
+          {removedReferences.length > 0 && <details className="formal-reference-history"><summary>已移除参考图（{removedReferences.length}）</summary><p>这里保留已保存的旧图片；恢复同名图片会替换当前选择，保存后生效。</p>{removedReferences.map(asset => <div className="formal-reference-history-row" key={asset.id}><span title={asset.name}>{asset.name}<small>{humanSize(asset.size)}</small></span><button disabled={locked} onClick={() => void readHistoricalReference(asset, false)} aria-label={`预览已移除参考图 ${asset.name}`}>预览</button><button disabled={locked} onClick={() => void readHistoricalReference(asset, true)} aria-label={`恢复参考图 ${asset.name}`}>恢复</button></div>)}</details>}
           </div>
         </details>
 

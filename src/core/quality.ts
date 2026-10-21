@@ -5,14 +5,20 @@ import type { Evaluation, ProjectBundle, TagAssignment } from './model.ts';
 import { allowedSeverities, latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
 import { mergeJoint, validateJoint } from './joint.ts';
 import { mergeReportNotes, validateReportNotes } from './report-notes.ts';
+import { resolveReferences, validateReferenceHistory } from './references.ts';
 
 export type QualityKind = 'calibration' | 'review' | 'recheck' | 'gsb';
 export type QualityBatch = { id: string; kind: QualityKind; seed: string; sampling?: 'mulberry32-fisher-yates-v1'; createdAt: string; schemeHash: string; questionsHash: string; candidates: string[]; sampled: string[]; trial: boolean; range: 'ABCF'; policy: 'dimension-gap-2-or-high-tag-set'; sourceBatchId: string | null };
-export type QualityTask = { id: string; batchId: string; kind: QualityKind; questionId: string; reviewerId: string; evidence: { productId: string; baselineId: string; mediaIds: string[]; bestMediaId: string | null }[]; demo: boolean; previouslySeen: boolean };
+export type QualityTask = { id: string; batchId: string; kind: QualityKind; questionId: string; reviewerId: string; evidence: { productId: string; baselineId: string; mediaIds: string[]; bestMediaId: string | null; referenceIds?: string[] }[]; demo: boolean; previouslySeen: boolean };
 export type QualityJudgment = { id: string; taskId: string; parentId: string | null; revision: number; reviewerId: string; ratings?: DimensionRatings; tags: TagAssignment[]; choice: 'win' | 'tie' | 'loss' | null; unable: boolean; exposed: boolean; notes: string; createdAt: string };
 export type QualityDecision = { id: string; taskId: string; judgmentId: string; parentId: string | null; participants: string[]; ratings?: DimensionRatings; tags: TagAssignment[]; usable: boolean; reason: string; createdAt: string };
 export type QualityState = { batches: QualityBatch[]; tasks: QualityTask[]; judgments: QualityJudgment[]; decisions: QualityDecision[]; finals?: { baselineId: string; decisionId: string }[]; joint?: import('./joint.ts').JointState; reportNotes?: import('./report-notes.ts').ReportNotes[]; space?: { type: 'blind' | 'return'; batchId: string; reviewerId: string } };
 export const emptyQuality = (): QualityState => ({ batches: [], tasks: [], judgments: [], decisions: [] });
+/** Historical tasks without a selection keep their original all-reference semantics. */
+export function qualityReferenceIds(bundle: ProjectBundle, task: QualityTask): string[] {
+  const legacy = () => bundle.assets.filter(asset => asset.projectId === bundle.project.id && asset.questionId === task.questionId && asset.role === 'reference' && asset.productId === null).map(asset => asset.id);
+  return [...new Set(task.evidence.flatMap(evidence => evidence.referenceIds ?? legacy()))];
+}
 const clean = (value: unknown): string => JSON.stringify(value, (_, row) => row && typeof row === 'object' && !Array.isArray(row) ? Object.fromEntries(Object.keys(row).sort().map(key => [key, row[key]])) : row);
 const imageDims = new Set(['A', 'B', 'C', 'F']);
 export function validateQualityExtension(previous: QualityState, next: QualityState): string[] {
@@ -55,6 +61,8 @@ export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, see
   if (!seed.trim()) throw new Error('请填写可追溯的抽样种子');
   const preparation = validateProject(bundle.project);
   if (preparation.length) throw new Error(preparation.join('；'));
+  const referenceErrors = validateReferenceHistory(bundle.project, bundle.assets, bundle.referenceRevisions);
+  if (referenceErrors.length) throw new Error(referenceErrors.join('；'));
   if (!bundle.project.rulesConfirmed || bundle.project.questions.length !== bundle.project.expectedQuestionCount) throw new Error('先补齐题库并确认评分规则');
   if (bundle.project.members.length < 2) throw new Error('独立评审至少需要两位成员');
   const state = structuredClone(bundle.quality ?? emptyQuality());
@@ -71,7 +79,8 @@ export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, see
     const evidence = productIds.map(productId => {
       const row = head(productId, questionId);
       if (!valid(row)) throw new Error(`${questionId} 的 ${bundle.project.products.find(product => product.id === productId)?.name} 缺少${kind === 'calibration' ? '原图与最佳图草稿' : '有效初评提交'}`);
-      return { productId, baselineId: row!.id, bestMediaId: row!.bestMediaId, mediaIds: [...row!.mediaIds] };
+      const referenceIds = row!.referenceIds ?? resolveReferences(bundle, questionId).assets.map(asset => asset.id);
+      return { productId, baselineId: row!.id, bestMediaId: row!.bestMediaId, mediaIds: [...row!.mediaIds], referenceIds: [...referenceIds] };
     });
     const attendedCalibration = state.tasks.some(task => task.kind === 'calibration' && task.reviewerId === reviewerId && task.questionId === questionId && state.judgments.some(judgment => judgment.taskId === task.id));
     const authoredPrimary = productIds.some(id => head(id, questionId)?.reviewerId === reviewerId);
@@ -121,7 +130,14 @@ export function validateQuality(raw: unknown, bundle: ProjectBundle, options: Ra
   for (const batch of state.batches) if (!['calibration', 'review', 'recheck', 'gsb'].includes(batch.kind) || typeof batch.seed !== 'string' || !batch.seed.trim() || !Number.isFinite(Date.parse(batch.createdAt)) || batch.schemeHash !== bundle.project.schemeHash || batch.questionsHash !== bundle.project.questionsHash || !Array.isArray(batch.candidates) || !Array.isArray(batch.sampled) || [...batch.candidates, ...batch.sampled].some(id => !bundle.project.questions.some(row => row.id === id)) || batch.range !== 'ABCF' || batch.policy !== 'dimension-gap-2-or-high-tag-set' || typeof batch.trial !== 'boolean') fail('质检批次口径或快照无效');
   for (const task of state.tasks) {
     if (!state.batches.some(batch => batch.id === task.batchId && batch.kind === task.kind) || !member(task.reviewerId) || !bundle.project.questions.some(row => row.id === task.questionId) || !Array.isArray(task.evidence) || task.evidence.length !== (task.kind === 'gsb' ? 2 : 1) || typeof task.demo !== 'boolean' || typeof task.previouslySeen !== 'boolean') { fail('质检任务或分工无效'); continue; }
-    for (const evidence of task.evidence) if (!evidence || !bundle.project.products.some(row => row.id === evidence.productId) || typeof evidence.baselineId !== 'string' || !Array.isArray(evidence.mediaIds) || evidence.mediaIds.some(id => !bundle.assets.some(asset => asset.id === id && asset.questionId === task.questionId && asset.productId === evidence.productId)) || !(evidence.bestMediaId === null || evidence.mediaIds.includes(evidence.bestMediaId))) fail('质检证据引用无效');
+    for (const evidence of task.evidence) {
+      if (!evidence || !bundle.project.products.some(row => row.id === evidence.productId) || typeof evidence.baselineId !== 'string' || !Array.isArray(evidence.mediaIds) || evidence.mediaIds.some(id => !bundle.assets.some(asset => asset.id === id && asset.questionId === task.questionId && asset.productId === evidence.productId)) || !(evidence.bestMediaId === null || evidence.mediaIds.includes(evidence.bestMediaId))) { fail('质检证据引用无效'); continue; }
+      if (evidence.referenceIds !== undefined) {
+        if (!Array.isArray(evidence.referenceIds) || evidence.referenceIds.length > 10000 || new Set(evidence.referenceIds).size !== evidence.referenceIds.length || evidence.referenceIds.some(id => typeof id !== 'string' || !bundle.assets.some(asset => asset.id === id && asset.projectId === bundle.project.id && asset.questionId === task.questionId && asset.role === 'reference' && asset.productId === null))) fail('质检固定参考图缺失或归属无效');
+        const baseline = bundle.evaluations.find(row => row.id === evidence.baselineId);
+        if (baseline?.referenceIds !== undefined && clean(baseline.referenceIds) !== clean(evidence.referenceIds)) fail('质检固定参考图与初评参考图快照不一致');
+      }
+    }
     if (task.demo !== task.evidence.some(evidence => bundle.project.products.find(product => product.id === evidence.productId)?.demo)) fail('模拟数据标识不一致');
     if (task.kind === 'review' && task.evidence.some(evidence => bundle.project.products.find(product => product.id === evidence.productId)?.ownerId === task.reviewerId)) fail('交叉复评不能分给产品初评负责人');
   }
@@ -144,7 +160,14 @@ export function validateQuality(raw: unknown, bundle: ProjectBundle, options: Ra
   }
   if (latestQuality(state.decisions, row => row.taskId).length !== new Set(state.decisions.map(row => row.taskId)).size) fail('裁决记录存在分叉');
   if (state.space && (!['blind', 'return'].includes(state.space.type) || !member(state.space.reviewerId) || !state.batches.some(batch => batch.id === state.space?.batchId) || state.tasks.some(task => task.batchId !== state.space?.batchId || task.reviewerId !== state.space?.reviewerId) || state.decisions.length)) fail('独立空间包含越界任务或裁决');
-  if (state.space && (!exact(state.space, ['type','batchId','reviewerId']) || !exact(state, ['batches','tasks','judgments','decisions','space']) || state.batches.some(batch => !exact(batch, ['id','kind','seed','sampling','createdAt','schemeHash','questionsHash','candidates','sampled','trial','range','policy','sourceBatchId'])) || state.tasks.some(task => !exact(task, ['id','batchId','kind','questionId','reviewerId','evidence','demo','previouslySeen']) || task.evidence.some(evidence => !exact(evidence, ['productId','baselineId','mediaIds','bestMediaId']))))) fail('独立任务包包含非协议字段，不能保证已剔除原判断');
+  if (state.space && (!exact(state.space, ['type','batchId','reviewerId']) || !exact(state, ['batches','tasks','judgments','decisions','space']) || state.batches.some(batch => !exact(batch, ['id','kind','seed','sampling','createdAt','schemeHash','questionsHash','candidates','sampled','trial','range','policy','sourceBatchId'])) || state.tasks.some(task => !exact(task, ['id','batchId','kind','questionId','reviewerId','evidence','demo','previouslySeen']) || task.evidence.some(evidence => !exact(evidence, ['productId','baselineId','mediaIds','bestMediaId','referenceIds']))))) fail('独立任务包包含非协议字段，不能保证已剔除原判断');
+  if (state.space) {
+    const permitted = new Set(state.tasks.flatMap(task => task.evidence.flatMap(evidence => [
+      ...evidence.mediaIds,
+      ...(evidence.referenceIds ?? bundle.assets.filter(asset => asset.role === 'reference' && asset.questionId === task.questionId).map(asset => asset.id))
+    ])));
+    if (bundle.referenceRevisions !== undefined || bundle.assets.some(asset => !permitted.has(asset.id))) fail('独立任务包包含越界原图或参考图绑定历史，不能保证固定证据范围');
+  }
   if (state.finals && (!Array.isArray(state.finals) || new Set(state.finals.map(row => row?.baselineId)).size !== state.finals.length || state.finals.some(row => !row || !state.decisions.some(decision => decision.id === row.decisionId && state.tasks.some(task => task.id === decision.taskId && ['review','recheck'].includes(task.kind) && task.evidence[0]?.baselineId === row.baselineId))))) fail('最终引用无效或重复');
   errors.push(...validateJoint(state.joint, bundle, options), ...validateReportNotes(state.reportNotes, { ...bundle, quality: state }));
   return errors;
@@ -159,6 +182,11 @@ export function validateQualityReturn(bundle: ProjectBundle, returned: ProjectBu
   for (const asset of returned.assets) {
     const source = bundle.assets.find(row => row.id === asset.id);
     if (!source || ['sha256','size','mime','projectId','questionId','productId','role'].some(key => source[key as keyof typeof source] !== asset[key as keyof typeof asset])) return ['返回包图片与初评基线的原图字节或归属不同'];
+  }
+  if (state.tasks.every(task => task.evidence.every(evidence => evidence.referenceIds !== undefined))) {
+    const expected = blindQualityBundle(bundle, state.space.batchId, state.space.reviewerId, true);
+    const byId = (assets: ProjectBundle['assets']) => [...assets].sort((a,b)=>a.id.localeCompare(b.id));
+    if (clean(byId(expected.assets)) !== clean(byId(returned.assets))) return ['返回包修改了固定参考图或匿名证据的原始元数据'];
   }
   return [];
 }
@@ -234,9 +262,13 @@ export function blindQualityBundle(bundle: ProjectBundle, batchId: string, revie
   if (!tasks.length) throw new Error('该成员在此批次没有任务');
   const ids = new Set(tasks.flatMap(task => task.evidence.flatMap(evidence => evidence.mediaIds)));
   const questionIds = new Set(tasks.map(task => task.questionId));
+  const referenceIds = new Set(tasks.flatMap(task => qualityReferenceIds(bundle, task)));
+  const hasPinnedReferences = tasks.some(task => task.evidence.some(evidence => evidence.referenceIds !== undefined));
+  const selectedAssets = bundle.assets.filter(asset => ids.has(asset.id) || (asset.role === 'reference' && questionIds.has(asset.questionId) && referenceIds.has(asset.id)));
+  if (hasPinnedReferences) selectedAssets.sort((a,b)=>a.id.localeCompare(b.id));
   return {
     project: { id: bundle.project.id, name: '独立评审', background: '', period: '', members: structuredClone(bundle.project.members), products: bundle.project.products.map(({id,name,version,role,demo,ownerId}) => ({ id,name,version,role,demo,ownerId, totalCost: null, commercialUse: 'unreviewed', commercialEvidence: '' })), questions: structuredClone(bundle.project.questions), scheme: structuredClone(bundle.project.scheme), rulesConfirmed: bundle.project.rulesConfirmed, expectedQuestionCount: bundle.project.expectedQuestionCount, status: bundle.project.status, revision: bundle.project.revision, createdAt: bundle.project.createdAt, updatedAt: bundle.project.updatedAt, schemeHash: bundle.project.schemeHash, questionsHash: bundle.project.questionsHash },
-    assets: bundle.assets.filter(asset => ids.has(asset.id) || (asset.role === 'reference' && questionIds.has(asset.questionId))).map((asset, index) => ({ ...asset, name: `evidence-${index + 1}.${asset.mime.split('/')[1]}`, createdAt: batch.createdAt })),
+    assets: selectedAssets.map((asset, index) => ({ ...asset, name: asset.role === 'reference' && hasPinnedReferences ? asset.name : `evidence-${index + 1}.${asset.mime.split('/')[1]}`, createdAt: batch.createdAt })),
     evaluations: [], walkthroughs: [], experiences: [],
     quality: { batches: [structuredClone(batch)], tasks: structuredClone(tasks), judgments: returning ? state.judgments.filter(row => tasks.some(task => task.id === row.taskId)) : [], decisions: [], space: { type: returning ? 'return' : 'blind', batchId, reviewerId } }
   };

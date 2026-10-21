@@ -90,6 +90,28 @@
 .formal-reference.missing { padding: 11px 4px 6px; border-style: dashed; cursor: pointer; justify-content: center; background: #fffcf5; color: #baa16c; }
 .formal-reference.missing > span { color: #b29b70; padding-bottom: 3px; }
 .formal-reference.missing > small { font-size: 7px; color: #c0ac86; }
+.formal-reference-card { position: relative; width: 128px; display: flex; flex-direction: column; gap: 6px; }
+.formal-reference-card .formal-reference { width: 100%; height: 116px; }
+.formal-reference-card .formal-reference img { height: 88px; }
+.formal-reference-card .formal-reference > span { font-size: 9px; padding: 6px; }
+.formal-reference-remove { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid #fff; border-radius: 50%; background: linear-gradient(145deg, #fff, #f1edf8); color: #81718f; box-shadow: 0 2px 7px #38244e26, inset 0 0 0 1px #a99bb526, inset 0 1px 0 #fff; cursor: pointer; opacity: 0; pointer-events: none; transform: translateY(2px) scale(.9); transition: opacity 160ms ease, transform 160ms ease, box-shadow 160ms ease, color 160ms ease, background 160ms ease; }
+.formal-reference-card:hover .formal-reference-remove, .formal-reference:focus-visible + .formal-reference-remove, .formal-reference-remove:focus-visible { opacity: 1; pointer-events: auto; transform: none; }
+.formal-reference-remove:hover:not(:disabled) { transform: translateY(-1px) scale(1.06); color: #b55b73; background: linear-gradient(145deg, #fff, #fcecf1); box-shadow: 0 4px 10px #76425a2e, inset 0 0 0 1px #d5a7b54d, inset 0 1px 0 #fff; }
+.formal-reference-remove:active:not(:disabled) { transform: scale(.94); box-shadow: 0 1px 3px #38244e20, inset 0 1px 3px #ad7e921f; }
+.formal-reference-remove:focus-visible { outline: 2px solid #7961cc; outline-offset: 3px; }
+.formal-reference-remove:disabled { opacity: .5; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .formal-reference-remove { transition: none; } }
+@media (hover: none) { .formal-reference-remove { opacity: 1; pointer-events: auto; transform: none; } }
+.formal-reference-actions { display: grid; grid-template-columns: 1fr; gap: 5px; }
+.formal-reference-actions button { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 32px; padding: 5px; border: 1px solid #e8e3f0; border-radius: 5px; color: #8d7a9e; background: #fff; font-size: 10px; }
+.formal-reference-actions button:hover { border-color: #b6a5d5; background: #f8f5fe; }
+.formal-reference-history { margin-top: 14px; color: #8d829e; font-size: 10px; }
+.formal-reference-history > summary { cursor: pointer; padding: 7px 0; }
+.formal-reference-history > p { margin: 5px 0 9px; font-size: 10px; line-height: 1.8; color: #a598b2; }
+.formal-reference-history-row { display: flex; align-items: center; gap: 7px; padding: 8px 0; border-top: 1px solid #eeeaf3; }
+.formal-reference-history-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.formal-reference-history-row small { color: #b2a7bc; margin-left: 6px; }
+.formal-reference-history-row button { flex-shrink: 0; min-height: 32px; border: 1px solid #e8e3f0; padding: 5px 8px; border-radius: 5px; color: #8d7a9e; background: #fff; font-size: 10px; }
 .formal-image-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 15px; border-bottom: 1px solid #f0f1f5; }
 .formal-image-heading h3 { display: flex; align-items: center; gap: 6px; color: #787d93; font-size: 12px; }
 .formal-image-heading small { font-size: 9px; color: #aaadbb; font-weight: 400; }

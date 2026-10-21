@@ -1,8 +1,11 @@
-import { isAnchorMode } from '../core/ratings';
 import baseline from '../../schemes/ecommerce-t2i/scheme.json';
-import type { Asset, AssetMetadata, Evaluation, Experience, Project, ProjectBundle, Scheme, Walkthrough, StageAudit } from '../core/model';
+import type { Asset, AssetMetadata, Evaluation, Experience, Project, ProjectBundle, Scheme, Walkthrough, StageAudit, ReferenceRevision } from '../core/model';
 import { latestEvaluations, validateEvaluation } from '../core/assessment';
-import { validateBackupStructure } from '../core/backup';
+import { archiveSchemaVersion, validateBackupStructure } from '../core/backup';
+import { validateReferenceHistory } from '../core/references';
+import { prepareReferenceSave } from './referenceSave';
+import type { ReferenceChange } from './referenceSave';
+export type { ReferenceChange } from './referenceSave';
 import { frozenConfigurationMatches } from '../core/projectEditing';
 import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
@@ -13,13 +16,13 @@ let connection: Promise<IDBDatabase> | undefined;
 export function openDatabase(): Promise<IDBDatabase> {
   if (!connection) {
     connection = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DATABASE, 5);
+      const request = indexedDB.open(DATABASE, 6);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
         if (!db.objectStoreNames.contains(PROJECT_TRASH_STORE)) db.createObjectStore(PROJECT_TRASH_STORE, { keyPath: 'id' });
         if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'id' }).createIndex('projectId', 'projectId');
-        for (const name of ['evaluations', 'assets', 'walkthroughs', 'experiences']) {
+        for (const name of ['evaluations', 'assets', 'walkthroughs', 'experiences', 'referenceRevisions']) {
           if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' }).createIndex('projectId', 'projectId');
         }
         for (const name of ['qualityStates', 'qualitySpaces']) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
@@ -143,19 +146,20 @@ export async function saveProject(input: Project): Promise<Project> {
 
 export async function getProjectBundle(projectId: string, options: { includeTrashed?: boolean } = {}): Promise<ProjectBundle> {
   const db = await openDatabase();
-  const transaction = db.transaction(['projects', 'evaluations', 'assets', 'walkthroughs', 'experiences', 'qualityStates', PROJECT_TRASH_STORE]);
-  const [project, evaluations, assets, walkthroughs, experiences, qualityRow, trashed] = await Promise.all([
+  const transaction = db.transaction(['projects', 'evaluations', 'assets', 'walkthroughs', 'experiences', 'qualityStates', 'referenceRevisions', PROJECT_TRASH_STORE]);
+  const [project, evaluations, assets, walkthroughs, experiences, qualityRow, referenceRevisions, trashed] = await Promise.all([
     requestValue<Project | undefined>(transaction.objectStore('projects').get(projectId)),
     requestValue<Evaluation[]>(transaction.objectStore('evaluations').index('projectId').getAll(projectId)),
     requestValue<AssetMetadata[]>(transaction.objectStore('assets').index('projectId').getAll(projectId)),
     requestValue<Walkthrough[]>(transaction.objectStore('walkthroughs').index('projectId').getAll(projectId)),
     requestValue<Experience[]>(transaction.objectStore('experiences').index('projectId').getAll(projectId)),
     requestValue<{id:string; state:import('../core/quality').QualityState}|undefined>(transaction.objectStore('qualityStates').get(projectId)),
+    requestValue<ReferenceRevision[]>(transaction.objectStore('referenceRevisions').index('projectId').getAll(projectId)),
     requestValue<{id: string}|undefined>(transaction.objectStore(PROJECT_TRASH_STORE).get(projectId))
   ]);
   if (!project) throw new Error('未找到该项目，请选择本机项目或恢复备份');
   if (trashed && !options.includeTrashed) throw new Error(PROJECT_TRASH_MESSAGE);
-  return { project, evaluations, assets, walkthroughs, experiences, ...(qualityRow ? { quality: qualityRow.state } : {}) };
+  return { project, evaluations, assets, walkthroughs, experiences, ...(qualityRow ? { quality: qualityRow.state } : {}), ...(referenceRevisions.length ? { referenceRevisions } : {}) };
 }
 
 export async function getAsset(id: string): Promise<Asset | undefined> {
@@ -194,15 +198,15 @@ export async function createAsset(file: File, metadata: Pick<Asset, 'projectId' 
   };
 }
 
-export async function saveEvaluation(projectId: string, record: Evaluation, newAssets: Asset[]): Promise<void> {
+export async function saveEvaluation(projectId: string, record: Evaluation, newAssets: Asset[], referenceChange?: ReferenceChange): Promise<void> {
   const db = await openDatabase();
   for (const asset of newAssets) {
-    if (asset.projectId !== projectId || asset.blob.size !== asset.size || !IMAGE_TYPES.has(asset.mime) || await digest(await asset.blob.arrayBuffer()) !== asset.sha256) {
+    if (asset.projectId !== projectId || asset.questionId !== record.questionId || (asset.role === 'reference' ? asset.productId !== null : asset.productId !== record.productId) || asset.blob.size !== asset.size || !IMAGE_TYPES.has(asset.mime) || await digest(await asset.blob.arrayBuffer()) !== asset.sha256) {
       throw new Error('图片校验失败，未写入评测记录');
     }
   }
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['projects', 'evaluations', 'assets', 'blobs', PROJECT_TRASH_STORE], 'readwrite');
+    const transaction = db.transaction(['projects', 'evaluations', 'assets', 'blobs', 'referenceRevisions', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
     const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(projectId);
     const projects = transaction.objectStore('projects').get(projectId);
@@ -221,20 +225,30 @@ export async function saveEvaluation(projectId: string, record: Evaluation, newA
           failure = new Error('评测记录已在另一个页面更新，请重新打开题目，不能覆盖原记录'); transaction.abort(); return;
         }
         const metadata = transaction.objectStore('assets').index('projectId').getAll(projectId);
-        metadata.onsuccess = () => {
-          const assets = [...metadata.result as AssetMetadata[], ...newAssets.map(({ blob, ...asset }) => asset)];
+        const references = transaction.objectStore('referenceRevisions').index('projectId').getAll(projectId);
+        references.onsuccess = () => {
+          const persistedAssets = metadata.result as AssetMetadata[];
+          const referenceRevisions = references.result as ReferenceRevision[];
+          const abort = (message: string) => { failure = new Error(message); transaction.abort(); };
+          const currentBundle: ProjectBundle = { project, evaluations: revisions, assets: persistedAssets, walkthroughs: [], experiences: [], referenceRevisions };
+          let prepared: ReturnType<typeof prepareReferenceSave>;
+          try {
+            prepared = prepareReferenceSave(currentBundle, record, newAssets.map(({ blob, ...asset }) => asset), referenceChange, () => crypto.randomUUID(), new Date().toISOString());
+          } catch (reason) { abort(reason instanceof Error ? reason.message : '参考图绑定已变化，请刷新后重试'); return; }
+          const { assets, nextReference } = prepared;
           if (record.status === 'submitted') {
             const errors = validateEvaluation(project, record, assets, { scope: 'task' });
-            if (errors.length) { failure = new Error(errors.join('；')); transaction.abort(); return; }
+            if (errors.length) { abort(errors.join('；')); return; }
           }
-          const allReferences = new Set(assets.map(asset => asset.id));
-          if (record.mediaIds.some(id => !allReferences.has(id))) {
-            failure = new Error('记录引用了尚未保存的原图'); transaction.abort(); return;
+          if (record.mediaIds.some(id => !assets.some(asset => asset.id === id && asset.role === 'output' && asset.questionId === record.questionId && asset.productId === record.productId))) {
+            abort('记录引用了尚未保存或不属于本题产品的原图'); return;
           }
           for (const { blob, ...asset } of newAssets) {
-            transaction.objectStore('assets').put(asset);
+            // Assets and their bytes are immutable, including superseded reference images.
+            transaction.objectStore('assets').add(asset);
             transaction.objectStore('blobs').put(blob, asset.sha256);
           }
+          if (nextReference) transaction.objectStore('referenceRevisions').add(nextReference);
           transaction.objectStore('evaluations').add(record);
         };
       };
@@ -265,7 +279,7 @@ export async function saveWalkthroughs(projectId: string, walkthroughs: Walkthro
 }
 
 export type FormalBackup = {
-  format: 'eval-studio-project-backup'; schemaVersion: 1 | 2; exportedAt: string;
+  format: 'eval-studio-project-backup'; schemaVersion: 1 | 2 | 3; exportedAt: string;
   bundle: ProjectBundle; snapshots: Project[];
   blobs: { sha256: string; mime: string; data: string }[];
   audits?: StageAudit[];
@@ -296,7 +310,7 @@ export async function exportProject(projectId: string): Promise<FormalBackup> {
     blobs.push({ sha256, mime: asset.mime, data: await toBase64(raw.blob) });
   }
   const audits = await requestValue<StageAudit[]>(db.transaction('stageReceipts').objectStore('stageReceipts').index('projectId').getAll(projectId));
-  return { format: 'eval-studio-project-backup', schemaVersion: isAnchorMode(bundle.project.scheme) ? 2 : 1, exportedAt: new Date().toISOString(), bundle, snapshots: snapshots.map(item => item.project), blobs, audits };
+  return { format: 'eval-studio-project-backup', schemaVersion: archiveSchemaVersion(bundle, audits), exportedAt: new Date().toISOString(), bundle, snapshots: snapshots.map(item => item.project), blobs, audits };
 }
 
 export async function restoreProject(raw: unknown): Promise<Project> {
@@ -305,6 +319,8 @@ export async function restoreProject(raw: unknown): Promise<Project> {
   const backup = raw as FormalBackup;
   const bundle = backup.bundle;
   if (bundle.quality?.space) throw new Error('独立任务包不能作为完整项目恢复');
+  const referenceErrors = validateReferenceHistory(bundle.project, bundle.assets, bundle.referenceRevisions);
+  if (referenceErrors.length) throw new Error(referenceErrors.join('；'));
   if (await digest(canonical(bundle.project.scheme)) !== bundle.project.schemeHash || await digest(canonical(bundle.project.questions)) !== bundle.project.questionsHash) {
     throw new Error('规则或题库快照摘要不匹配，未导入');
   }
@@ -325,7 +341,7 @@ export async function restoreProject(raw: unknown): Promise<Project> {
   }
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', PROJECT_TRASH_STORE], 'readwrite');
+    const transaction = db.transaction(['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', 'referenceRevisions', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
     const trashed = transaction.objectStore(PROJECT_TRASH_STORE).get(bundle.project.id);
     const spaceCheck = transaction.objectStore('qualitySpaces').getAll();
@@ -343,6 +359,7 @@ export async function restoreProject(raw: unknown): Promise<Project> {
       for (const audit of backup.audits ?? []) transaction.objectStore('stageReceipts').add(audit);
       for (const project of backup.snapshots) transaction.objectStore('snapshots').add({ id: `${project.id}:${project.revision}`, projectId: project.id, project });
       for (const record of bundle.evaluations) transaction.objectStore('evaluations').add(record);
+      for (const reference of bundle.referenceRevisions ?? []) transaction.objectStore('referenceRevisions').add(reference);
       for (const asset of bundle.assets) transaction.objectStore('assets').add(asset);
       for (const [hash, blob] of restoredBlobs) transaction.objectStore('blobs').put(blob, hash);
       for (const item of bundle.walkthroughs) transaction.objectStore('walkthroughs').add(item);

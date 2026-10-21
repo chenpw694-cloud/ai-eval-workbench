@@ -4,12 +4,12 @@ import { isAnchorMode, imageRatingDimensions } from '../core/ratings';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, CheckCircle2, Download, Eye, FileCheck2, FlaskConical, LoaderCircle, ShieldCheck, Upload } from 'lucide-react';
 import type { Asset, ProjectBundle, TagAssignment } from '../core/model';
-import { createQualityBatch, judgmentDisagreement, emptyQuality, latestQuality, qualitySummary } from '../core/quality';
+import { createQualityBatch, judgmentDisagreement, emptyQuality, latestQuality, qualitySummary, qualityReferenceIds } from '../core/quality';
 import type { QualityBatch, QualityDecision, QualityJudgment, QualityKind, QualityState, QualityTask } from '../core/quality';
 import { allowedSeverities } from '../core/assessment';
 import { exportIndependent, importIndependent, importJudgments, listReviewSpaces, saveQuality, saveReviewSpace, spaceAsset } from '../storage/quality';
 import type { ReviewSpace } from '../storage/quality';
-import { getAsset } from '../storage/projects';
+import { digest, getAsset } from '../storage/projects';
 import { PageHeading, PanelHeading, Pill } from '../ui';
 import './quality-workspace.css';
 
@@ -44,10 +44,17 @@ function Evidence({ bundle, task, loader }: { bundle: ProjectBundle; task: Quali
   useEffect(() => {
     let active = true; const urls: string[] = [];
     setImages([]); setError('');
-    const references = bundle.assets.filter(asset => asset.questionId === task.questionId && asset.role === 'reference').map(asset => ({ id: asset.id, best: false, caption: '参考图' }));
+    const references = qualityReferenceIds(bundle, task).map(id => {
+      const products = task.evidence.filter(evidence => evidence.referenceIds === undefined || evidence.referenceIds.includes(id))
+        .map(evidence => bundle.project.products.find(product => product.id === evidence.productId)?.name || '产品');
+      const pinned = task.evidence.every(evidence => evidence.referenceIds !== undefined);
+      return { id, best: false, caption: task.evidence.length > 1 ? `${pinned ? '固定参考图' : '旧任务参考图'} · ${products.join(' / ')}` : pinned ? '参考图 · 任务固定证据' : '参考图 · 旧任务范围' };
+    });
     const outputs = task.evidence.flatMap(evidence => evidence.mediaIds.map(id => ({ id, best: id === evidence.bestMediaId, caption: bundle.project.products.find(row => row.id === evidence.productId)?.name ?? '产品' })));
     Promise.all([...references, ...outputs].map(async item => {
-      const asset = await loader(item.id); if (!asset) throw new Error('原图缺失，不能独立判断');
+      const metadata = bundle.assets.find(asset => asset.id === item.id);
+      const asset = await loader(item.id);
+      if (!metadata || !asset || asset.sha256 !== metadata.sha256 || asset.size !== metadata.size || asset.mime !== metadata.mime || await digest(await asset.blob.arrayBuffer()) !== metadata.sha256) throw new Error('任务固定原图缺失或与证据快照不符，不能独立判断');
       const url = URL.createObjectURL(asset.blob); urls.push(url); return { ...item, url };
     })).then(rows => { if (active) setImages(rows); }).catch(error => { if (active) setError(message(error)); });
     return () => { active = false; urls.forEach(url => URL.revokeObjectURL(url)); };

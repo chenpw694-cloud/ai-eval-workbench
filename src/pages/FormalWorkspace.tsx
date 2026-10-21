@@ -275,8 +275,8 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
               catch (reason) { notify(reason instanceof Error ? reason.message : '无法开始评测'); }
             }}/> }
             {route.section === 'setup' && <ProjectSetup key={project.id} project={project} locked={locked} onSave={updateProject} onToast={notify} onRestart={() => openProjectAction('restart', project)} onTrash={() => openProjectAction('trash', project)}/>}
-            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onSave={async (record, assets) => {
-              await saveEvaluation(project.id, record, assets);
+            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onSave={async (record, assets, referenceChange) => {
+              await saveEvaluation(project.id, record, assets, referenceChange);
               await refresh();
             }}/>}
             {route.section === 'walkthrough' && <FormalWalkthrough bundle={bundle} onToast={notify} onSave={async (nextProject, walkthroughs, experiences) => {

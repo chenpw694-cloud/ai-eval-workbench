@@ -14,15 +14,20 @@ export async function saveQuality(bundle: ProjectBundle, state: QualityState) {
   if (errors.length) throw new Error(errors.join('；'));
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['projects', 'qualityStates', 'snapshots', PROJECT_TRASH_STORE], 'readwrite');
+    const tx = db.transaction(['projects', 'qualityStates', 'snapshots', 'referenceRevisions', PROJECT_TRASH_STORE], 'readwrite');
     let failure: Error | undefined;
     const trashed = tx.objectStore(PROJECT_TRASH_STORE).get(bundle.project.id);
     const projectRequest = tx.objectStore('projects').get(bundle.project.id);
     const current = tx.objectStore('qualityStates').get(bundle.project.id);
-    current.onsuccess = () => {
+    const referenceRequest = tx.objectStore('referenceRevisions').index('projectId').getAll(bundle.project.id);
+    referenceRequest.onsuccess = () => {
       if (trashed.result) { failure = new Error(PROJECT_TRASH_MESSAGE); tx.abort(); return; }
       if (canonical(current.result?.state ?? emptyQuality()) !== canonical(bundle.quality ?? emptyQuality())) {
         failure = new Error('质检数据已在其他页面更新，请重新打开后再保存'); tx.abort(); return;
+      }
+      const byId = (rows: {id:string}[]) => [...rows].sort((a,b)=>a.id.localeCompare(b.id));
+      if (canonical(byId(referenceRequest.result)) !== canonical(byId(bundle.referenceRevisions ?? []))) {
+        failure = new Error('参考图选择已在其他页面更新，请重新打开后固定质检证据'); tx.abort(); return;
       }
       const extensionErrors = validateQualityExtension(current.result?.state ?? emptyQuality(), state);
       if (extensionErrors.length) { failure = new Error(extensionErrors.join('；')); tx.abort(); return; }
@@ -69,7 +74,12 @@ export async function importIndependent(files: File[]): Promise<ReviewSpace> {
       request.onsuccess = () => {
       if (request.result) {
         output = request.result;
-        if (canonical(output.bundle.quality?.tasks) !== canonical(incoming.bundle.quality?.tasks)) { failure = new Error('同一独立空间的证据或任务不同，不能覆盖'); tx.abort(); }
+        const objective = (value: ProjectBundle) => ({
+          project: {id:value.project.id,schemeHash:value.project.schemeHash,questionsHash:value.project.questionsHash,scheme:value.project.scheme,questions:value.project.questions,members:value.project.members,products:value.project.products},
+          assets:[...value.assets].sort((a,b)=>a.id.localeCompare(b.id)),
+          tasks:value.quality?.tasks,batches:value.quality?.batches
+        });
+        if (canonical(objective(output.bundle)) !== canonical(objective(incoming.bundle))) { failure = new Error('同一独立空间的固定证据、图片元数据或任务不同，不能覆盖'); tx.abort(); }
       } else tx.objectStore('qualitySpaces').add(incoming);
       };
       };

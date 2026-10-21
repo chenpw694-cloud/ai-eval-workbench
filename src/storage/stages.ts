@@ -17,21 +17,22 @@ const requestValue = <T,>(request: IDBRequest<T>) => new Promise<T>((resolve, re
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
 });
-const storeNames = ['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', PROJECT_TRASH_STORE];
+const storeNames = ['projects', 'snapshots', 'evaluations', 'assets', 'blobs', 'walkthroughs', 'experiences', 'stageReceipts', 'qualityStates', 'qualitySpaces', 'referenceRevisions', PROJECT_TRASH_STORE];
 
 function readBundle(transaction: IDBTransaction, projectId: string, done: (bundle: ProjectBundle | null) => void) {
   const keys = ['evaluations', 'assets', 'walkthroughs', 'experiences'] as const;
   const projectRequest = transaction.objectStore('projects').get(projectId);
   const requests = keys.map(key => transaction.objectStore(key).index('projectId').getAll(projectId));
   const qualityRequest = transaction.objectStore('qualityStates').get(projectId);
-  let pending = 2 + requests.length;
+  const referenceRequest = transaction.objectStore('referenceRevisions').index('projectId').getAll(projectId);
+  let pending = 3 + requests.length;
   const loaded = () => {
     if (--pending) return;
     if (!projectRequest.result) { done(null); return; }
     const [evaluations, assets, walkthroughs, experiences] = requests.map(request => request.result);
-    done({ project: projectRequest.result, evaluations, assets, walkthroughs, experiences, ...(qualityRequest.result ? {quality:qualityRequest.result.state} : {}) });
+    done({ project: projectRequest.result, evaluations, assets, walkthroughs, experiences, ...(referenceRequest.result.length ? {referenceRevisions:referenceRequest.result} : {}), ...(qualityRequest.result ? {quality:qualityRequest.result.state} : {}) });
   };
-  projectRequest.onsuccess = loaded; qualityRequest.onsuccess = loaded;
+  projectRequest.onsuccess = loaded; qualityRequest.onsuccess = loaded; referenceRequest.onsuccess = loaded;
   requests.forEach(request => { request.onsuccess = loaded; });
 }
 
@@ -41,6 +42,7 @@ function fingerprint(bundle: ProjectBundle | null): string {
     ...bundle,
     evaluations: [...bundle.evaluations].sort((a, b) => a.id.localeCompare(b.id)),
     assets: [...bundle.assets].sort((a, b) => a.id.localeCompare(b.id)),
+    ...(bundle.referenceRevisions !== undefined ? {referenceRevisions:[...bundle.referenceRevisions].sort((a,b)=>a.id.localeCompare(b.id))} : {}),
     walkthroughs: [...bundle.walkthroughs].sort((a, b) => a.id.localeCompare(b.id)),
     experiences: [...bundle.experiences].sort((a, b) => a.productId.localeCompare(b.productId))
   });
@@ -169,6 +171,7 @@ export async function commitStage(inspection: StageInspection, options: {
         if (fingerprint(current) !== inspection.token) { abort('预览后本机数据已变化，请重新选择文件并检查，当前数据未改动'); return; }
         const oldRecords = new Set(current?.evaluations.map(record => record.id));
         const oldAssets = new Set(current?.assets.map(asset => asset.id));
+        const oldReferences = new Set(current?.referenceRevisions?.map(row => row.id));
         const foreignChecks = [
           ...merged.walkthroughs.map(row => ({ store: 'walkthroughs', id: row.id })),
           ...(inspection.manifest.audits ?? []).map(row => ({ store: 'stageReceipts', id: row.id }))
@@ -186,6 +189,7 @@ export async function commitStage(inspection: StageInspection, options: {
           for (const project of history.snapshots) transaction.objectStore('snapshots').add({ id: `${projectId}:${project.revision}`, projectId, project });
           for (const record of merged.evaluations) if (!oldRecords.has(record.id)) transaction.objectStore('evaluations').add(record);
           for (const asset of merged.assets) if (!oldAssets.has(asset.id)) transaction.objectStore('assets').add(asset);
+          for (const row of merged.referenceRevisions ?? []) if (!oldReferences.has(row.id)) transaction.objectStore('referenceRevisions').add(row);
           for (const [hash, blob] of inspection.blobs) transaction.objectStore('blobs').put(blob, hash);
           for (const row of current?.walkthroughs ?? []) transaction.objectStore('walkthroughs').delete(row.id);
           for (const row of current?.experiences ?? []) transaction.objectStore('experiences').delete(`${projectId}:${row.productId}`);

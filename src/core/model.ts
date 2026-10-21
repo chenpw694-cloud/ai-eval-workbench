@@ -44,12 +44,19 @@ export type Asset = {
   sha256: string; blob: Blob; createdAt: string;
 };
 export type AssetMetadata = Omit<Asset, 'blob'>;
+/** Append-only selection of a question's current reference assets. */
+export type ReferenceRevision = {
+  id: string; projectId: string; questionId: string; parentId: string | null;
+  revision: number; assetIds: string[]; createdAt: string;
+};
 export type MediaCheck = { mediaId: string; usable: boolean | null; infringement: boolean | null };
 export type Evaluation = {
   id: string; projectId: string; questionId: string; productId: string;
   reviewerId: string; revision: number; parentId: string | null;
   status: 'draft' | 'submitted'; mediaIds: string[]; bestMediaId: string | null;
   mediaChecks: MediaCheck[]; tags: TagAssignment[]; ratings?: DimensionRatings;
+  /** Absent on legacy records, which retain their original all-assets reference checks. */
+  referenceIds?: string[];
   seconds: number | null; failed: boolean; failureReason: string; notes: string;
   schemeHash: string; questionsHash: string; createdAt: string;
 };
@@ -63,6 +70,7 @@ export type ProjectBundle = {
   project: Project; evaluations: Evaluation[]; assets: AssetMetadata[];
   walkthroughs: Walkthrough[]; experiences: Experience[];
   quality?: import('./quality.ts').QualityState;
+  referenceRevisions?: ReferenceRevision[];
 };
 export type StageAudit = {
   id: string; projectId: string; packageId: string; importedAt: string; manifestHash?: string;

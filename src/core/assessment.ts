@@ -142,8 +142,26 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
       if (check && typeof check.infringement === 'boolean' && hasInfringementTag !== check.infringement) errors.push('最佳图 F-01 标签与逐图侵权检查不一致');
     }
   } else if (record.bestMediaId !== null) errors.push('零输出任务不能引用最佳图');
+  let references = assets;
+  if (record.referenceIds !== undefined) {
+    if (!Array.isArray(record.referenceIds) || record.referenceIds.some(id => !filled(id)) || new Set(record.referenceIds).size !== record.referenceIds.length) {
+      errors.push('评测参考图引用列表无效或重复');
+      references = [];
+    } else {
+      references = record.referenceIds.flatMap(id => {
+        const matching = assets.filter(asset => asset.id === id);
+        const asset = matching[0];
+        if (matching.length !== 1 || !asset || asset.projectId !== project.id || asset.questionId !== record.questionId || asset.role !== 'reference' || asset.productId !== null) {
+          errors.push(`评测参考图缺失或归属不匹配：${id}`);
+          return [];
+        }
+        return [asset];
+      });
+    }
+  }
   for (const name of unique(question?.referenceNames ?? [])) {
-    if (!assets.some(asset => asset.projectId === project.id && asset.questionId === record.questionId && asset.role === 'reference' && asset.name === name)) errors.push(`参考图缺失：${name}`);
+    if (!references.some(asset => asset.projectId === project.id && asset.questionId === record.questionId && asset.role === 'reference' && asset.name === name)) errors.push(`参考图缺失：${name}`);
+    if (record.referenceIds !== undefined && references.filter(asset => asset.name === name).length > 1) errors.push(`评测必需参考图槽位存在同名歧义：${name}`);
   }
   return unique(errors);
 }

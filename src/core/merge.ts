@@ -1,4 +1,5 @@
 import { mergeQuality } from './quality.ts';
+import { validateReferenceHistory } from './references.ts';
 import type { AssetMetadata, Evaluation, Experience, Product, Project, ProjectBundle, Walkthrough } from './model.ts';
 
 /** Structural subset of StagePackage; importing its runtime is unnecessary. */
@@ -61,6 +62,7 @@ function normalizeBundle(bundle: ProjectBundle): ProjectBundle {
     project: structuredClone(bundle.project),
     evaluations: [...bundle.evaluations].sort((left, right) => evalKey(left).localeCompare(evalKey(right)) || left.revision - right.revision || left.id.localeCompare(right.id)),
     assets: sortedById(bundle.assets),
+    ...(bundle.referenceRevisions !== undefined ? { referenceRevisions: sortedById(bundle.referenceRevisions) } : {}),
     walkthroughs: [...bundle.walkthroughs].sort((left, right) => left.productId.localeCompare(right.productId) || left.task.localeCompare(right.task) || left.id.localeCompare(right.id)),
     ...(bundle.quality ? {quality:structuredClone(bundle.quality)} : {}),
     experiences: [...bundle.experiences].sort((left, right) => left.productId.localeCompare(right.productId))
@@ -147,6 +149,7 @@ function validateBundleReferences(bundle: ProjectBundle, label: string, blockers
   const questionIds = new Set(project.questions.map(row => row.id));
   const memberIds = new Set(project.members.map(row => row.id));
   const assetMap = deduplicate(bundle.assets, `${label}图片`, blockers);
+  blockers.push(...validateReferenceHistory(project, bundle.assets, bundle.referenceRevisions).map(message => `${label}：${message}`));
   for (const row of bundle.assets) {
     if (row.projectId !== project.id || !questionIds.has(row.questionId) || (row.role === 'output' ? !row.productId || !productIds.has(row.productId) : row.productId !== null)) blockers.push(`${label}图片归属无效：${row.id}`);
   }
@@ -156,6 +159,10 @@ function validateBundleReferences(bundle: ProjectBundle, label: string, blockers
       const asset = assetMap.get(id);
       return !asset || asset.role !== 'output' || asset.productId !== row.productId || asset.questionId !== row.questionId;
     })) blockers.push(`${label}评测缺少归属匹配的图片清单：${row.id}`);
+    if (row.referenceIds !== undefined && (!Array.isArray(row.referenceIds) || new Set(row.referenceIds).size !== row.referenceIds.length || row.referenceIds.some(id => {
+      const asset = assetMap.get(id);
+      return typeof id !== 'string' || !asset || asset.projectId !== project.id || asset.role !== 'reference' || asset.questionId !== row.questionId || asset.productId !== null;
+    }))) blockers.push(`${label}评测固定参考图缺失或归属不匹配：${row.id}`);
   }
   for (const row of bundle.walkthroughs) if (row.projectId !== project.id || !productIds.has(row.productId)) blockers.push(`${label}走查归属无效：${row.id}`);
   for (const productId of productIds) {
@@ -202,6 +209,16 @@ export function planMerge(local: ProjectBundle | null, stage: StageLike): MergeP
     else counts.newAssets++;
   }
   merged.assets = [...localAssets.values(), ...[...incomingAssets.values()].filter(row => !localAssets.has(row.id))];
+  if (base?.referenceRevisions !== undefined || incoming.referenceRevisions !== undefined) {
+    const revisions = deduplicate(base?.referenceRevisions ?? [], '本机参考图绑定', blockers);
+    for (const row of incoming.referenceRevisions ?? []) {
+      const previous = revisions.get(row.id);
+      if (previous && !same(previous, row)) blockers.push(`参考图绑定同 ID 内容不一致：${row.id}`);
+      else if (!previous) revisions.set(row.id, row);
+    }
+    merged.referenceRevisions = [...revisions.values()];
+    blockers.push(...validateReferenceHistory(merged.project, merged.assets, merged.referenceRevisions).map(message => `合并参考图绑定：${message}`));
+  }
   const groups = new Set([...localRecords.values(), ...incomingRecords.values()].map(evalKey));
   merged.evaluations = [...localRecords.values()];
   for (const key of [...groups].sort()) {

@@ -1,8 +1,9 @@
 import { isAnchorMode, ratingErrors, ratingSchemeErrors, questionDimensions } from './ratings.ts';
 import { validateQuality } from './quality.ts';
-import type { AssetMetadata, Evaluation, Project, ProjectBundle } from './model.ts';
+import type { AssetMetadata, Evaluation, Project, ProjectBundle, StageAudit } from './model.ts';
 import { latestEvaluations } from './assessment.ts';
 import { validateJointPolicy } from './joint.ts';
+import { validateReferenceHistory } from './references.ts';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string';
@@ -10,6 +11,42 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 const date = (value: unknown) => string(value) && Number.isFinite(Date.parse(value));
 const hash = (value: unknown): value is string => string(value) && /^[a-f0-9]{64}$/.test(value);
 const severities = new Set(['P0', 'P1', 'P2', 'P3']);
+
+/** New reference selections are protocol data, even when the explicit selection is empty. */
+export function hasReferenceProtocolFields(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasReferenceProtocolFields);
+  if (!object(value)) return false;
+  if (value.referenceRevisions !== undefined || value.referenceIds !== undefined) return true;
+  // Question custom fields are arbitrary user text, not protocol extensions.
+  return Object.entries(value).some(([key, child]) => key !== 'fields' && hasReferenceProtocolFields(child));
+}
+
+export function archiveSchemaVersion(bundle: ProjectBundle, audits?: StageAudit[]): 1 | 2 | 3 {
+  if (hasReferenceProtocolFields(bundle) || hasReferenceProtocolFields(audits)) return 3;
+  return isAnchorMode(bundle.project.scheme) ? 2 : 1;
+}
+
+export function referenceSnapshotErrors(bundle: ProjectBundle): string[] {
+  const errors = validateReferenceHistory(bundle.project, bundle.assets, bundle.referenceRevisions);
+  const validIds = (ids: unknown, questionId: string) => Array.isArray(ids) && ids.length <= 10000 &&
+    new Set(ids).size === ids.length && ids.every(id => typeof id === 'string' && bundle.assets.some(asset =>
+      asset.id === id && asset.role === 'reference' && asset.projectId === bundle.project.id &&
+      asset.questionId === questionId && asset.productId === null));
+  for (const row of bundle.evaluations) {
+    if (row.referenceIds === undefined) continue;
+    if (!validIds(row.referenceIds, row.questionId)) {
+      errors.push(`评测 ${row.id} 的固定参考图列表、归属或原图元数据无效`);
+    }
+  }
+  for (const task of bundle.quality?.tasks ?? []) {
+    for (const evidence of task.evidence) {
+      if (evidence.referenceIds !== undefined && !validIds(evidence.referenceIds, task.questionId)) {
+        errors.push(`质检任务 ${task.id} 的固定参考图缺失或归属无效`);
+      }
+    }
+  }
+  return [...new Set(errors)];
+}
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -24,6 +61,14 @@ function auditErrors(raw: unknown, projectId: string): string[] {
   const validBundle = (value: unknown) => object(value) && object(value.project) && value.project.id === projectId && ['evaluations', 'assets', 'walkthroughs', 'experiences'].every(key => Array.isArray(value[key]) && (value[key] as unknown[]).length <= 100000);
   for (const audit of raw) {
     if (!object(audit) || !string(audit.id) || !audit.id || ids.has(audit.id) || audit.projectId !== projectId || !string(audit.packageId) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(audit.packageId) || !(audit.manifestHash === undefined || hash(audit.manifestHash)) || !date(audit.importedAt) || !string(audit.senderId) || !['assignment', 'submission', 'baseline'].includes(String(audit.kind)) || !object(audit.counts) || Object.keys(audit.counts).length > 100 || Object.values(audit.counts).some(value => !Number.isSafeInteger(value) || Number(value) < 0) || !object(audit.decisions) || Object.keys(audit.decisions).length > 100000 || Object.values(audit.decisions).some(value => value !== 'local' && value !== 'incoming') || !string(audit.resolverId) || !string(audit.reason) || audit.reason.length > 10000 || !Array.isArray(audit.conflicts) || audit.conflicts.length > 10000 || !validBundle(audit.incoming) || !(audit.before === null || validBundle(audit.before))) return ['历史审计结构、项目归属或字段无效'];
+    try {
+      for (const snapshot of [audit.incoming, audit.before]) {
+        if (snapshot !== null) {
+          const referenceErrors = referenceSnapshotErrors(snapshot as unknown as ProjectBundle);
+          if (referenceErrors.length) return referenceErrors.map(message => `历史审计：${message}`);
+        }
+      }
+    } catch { return ['历史审计参考图修订结构无效']; }
     ids.add(audit.id);
   }
   return [];
@@ -32,7 +77,7 @@ function auditErrors(raw: unknown, projectId: string): string[] {
 export function validateBackupStructure(raw: unknown): string[] {
   const errors: string[] = [];
   const fail = (message: string) => { if (errors.length < 30) errors.push(message); };
-  if (!object(raw) || raw.format !== 'eval-studio-project-backup' || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)) return ['不是支持的正式项目备份，不能使用演示备份或阶段提交包恢复'];
+  if (!object(raw) || raw.format !== 'eval-studio-project-backup' || ![1, 2, 3].includes(Number(raw.schemaVersion)) || typeof raw.schemaVersion !== 'number') return ['不是支持的正式项目备份，不能使用演示备份或阶段提交包恢复'];
   if (!object(raw.bundle) || !Array.isArray(raw.snapshots) || !Array.isArray(raw.blobs)) return ['备份缺少项目、快照或图片数据'];
   const bundle = raw.bundle;
   const p = bundle.project;
@@ -67,7 +112,8 @@ export function validateBackupStructure(raw: unknown): string[] {
   const scheme = p.scheme;
   if (!string(scheme.id) || !string(scheme.name) || !string(scheme.version) || !Array.isArray(scheme.dimensions) || !Array.isArray(scheme.tags) || !object(scheme.policies)) return [...errors, '评分方案结构无效'];
   errors.push(...ratingSchemeErrors(scheme as unknown as import('./model.ts').Scheme));
-  if (raw.schemaVersion !== (isAnchorMode(scheme as unknown as import('./model.ts').Scheme) ? 2 : 1)) fail('不是支持的正式项目备份：版本与评分方式不一致，请升级工作台');
+  if (raw.schemaVersion !== 3 && raw.schemaVersion !== (isAnchorMode(scheme as unknown as import('./model.ts').Scheme) ? 2 : 1)) fail('不是支持的正式项目备份：版本与评分方式不一致，请升级工作台');
+  if (raw.schemaVersion !== 3 && hasReferenceProtocolFields({ bundle, audits: raw.audits })) fail('参考图绑定、固定参考图或质检证据需要 schemaVersion 3，旧版备份不能夹带新字段');
   const dimensionIds = uniqueIds(scheme.dimensions, '维度');
   if (scheme.jointReview !== undefined) errors.push(...validateJointPolicy(scheme.jointReview as import('./joint.ts').JointPolicy));
   if (scheme.dimensions.some(row => !object(row) || !string(row.name) || !string(row.method) || !finite(row.weight) || row.weight < 0 || row.weight > 100)) fail('维度字段或权重无效');
@@ -87,6 +133,8 @@ export function validateBackupStructure(raw: unknown): string[] {
   for (const row of bundle.assets) {
     if (!object(row) || row.projectId !== p.id || !questionIds.has(String(row.questionId)) || !['reference', 'output'].includes(String(row.role)) || (row.role === 'reference' ? row.productId !== null : !productIds.has(String(row.productId))) || !string(row.name) || !hash(row.sha256) || !Number.isSafeInteger(row.size) || Number(row.size) < 1 || Number(row.size) > 25 * 1024 * 1024 || !date(row.createdAt) || !blobs.has(String(row.sha256)) || blobs.get(String(row.sha256))?.mime !== row.mime) fail('图片引用、类型、大小或原图缺失');
   }
+  try { errors.push(...referenceSnapshotErrors(bundle as unknown as ProjectBundle)); }
+  catch { fail('参考图绑定或固定参考图结构无效'); }
   const assignmentsValid = (tags: unknown) => Array.isArray(tags) && tags.every(tag => object(tag) && string(tag.code) && codes.has(tag.code) && severities.has(String(tag.severity)));
   for (const row of bundle.evaluations) {
     if (!object(row) || row.projectId !== p.id || !questionIds.has(String(row.questionId)) || !productIds.has(String(row.productId)) || !(memberIds.has(String(row.reviewerId)) || (row.status === 'draft' && row.reviewerId === '')) || !Number.isSafeInteger(row.revision) || Number(row.revision) < 1 || !(row.parentId === null || recordIds.has(String(row.parentId))) || !['draft', 'submitted'].includes(String(row.status)) || !Array.isArray(row.mediaIds) || !row.mediaIds.every(id => string(id) && assetIds.has(id)) || !(row.bestMediaId === null || (string(row.bestMediaId) && row.mediaIds.includes(row.bestMediaId))) || !Array.isArray(row.mediaChecks) || !row.mediaChecks.every(item => object(item) && row.mediaIds instanceof Array && row.mediaIds.includes(item.mediaId) && [null, true, false].includes(item.usable as null | boolean) && [null, true, false].includes(item.infringement as null | boolean)) || !assignmentsValid(row.tags) || !(row.seconds === null || (finite(row.seconds) && row.seconds >= 0)) || typeof row.failed !== 'boolean' || !string(row.failureReason) || !string(row.notes) || !date(row.createdAt) || !hash(row.schemeHash) || !hash(row.questionsHash)) fail('评测修订字段或引用无效');
@@ -138,7 +186,7 @@ export function validateArchiveMetadata(raw: unknown): string[] {
     if (object(asset) && !byHash.has(asset.sha256)) byHash.set(asset.sha256, { sha256: asset.sha256, mime: asset.mime, data: '' });
   }
   return validateBackupStructure({
-    format: 'eval-studio-project-backup', schemaVersion: isAnchorMode((raw.bundle as unknown as ProjectBundle).project.scheme) ? 2 : 1,
+    format: 'eval-studio-project-backup', schemaVersion: raw.schemaVersion ?? archiveSchemaVersion(raw.bundle as unknown as ProjectBundle, raw.audits as StageAudit[] | undefined),
     bundle: raw.bundle, snapshots: raw.snapshots, audits: raw.audits, blobs: [...byHash.values()],
   });
 }

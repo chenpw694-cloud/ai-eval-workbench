@@ -38,6 +38,7 @@ export function archiveContent(bundle: ProjectBundle): unknown {
   const quality = bundle.quality;
   return { ...bundle, project: {...project, products:sorted(project.products),members:sorted(project.members)},
     evaluations:sorted(bundle.evaluations),assets:sorted(bundle.assets),walkthroughs:sorted(bundle.walkthroughs),
+    ...(bundle.referenceRevisions!==undefined?{referenceRevisions:sorted(bundle.referenceRevisions)}:{}),
     experiences:[...bundle.experiences].map(({productId,score,notes})=>({productId,score,notes})).sort((a,b)=>a.productId.localeCompare(b.productId)),
     ...(quality ? {quality:{...quality,batches:sorted(quality.batches),tasks:sorted(quality.tasks),judgments:sorted(quality.judgments),decisions:sorted(quality.decisions),...(quality.reportNotes?{reportNotes:sorted(quality.reportNotes)}:{})}} : {}) };
 }

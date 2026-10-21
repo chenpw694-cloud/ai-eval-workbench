@@ -1,22 +1,23 @@
-import type { AssetMetadata, Evaluation, Experience, Project, ProjectBundle, StageAudit, Walkthrough } from '../core/model';
+import type { AssetMetadata, Evaluation, Experience, Project, ProjectBundle, ReferenceRevision, StageAudit, Walkthrough } from '../core/model';
 import type { ArchiveInput, ArchiveRecord, ArchiveSource } from '../core/archive';
 import { archiveContentHash, buildFinalArchive, readFinalArchive } from '../core/archive';
 import { canonical, getAsset, openDatabase } from './projects';
 import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
-const stores=['projects','evaluations','assets','walkthroughs','experiences','qualityStates','snapshots','stageReceipts'];
+const stores=['projects','evaluations','assets','walkthroughs','experiences','qualityStates','snapshots','stageReceipts','referenceRevisions'];
 const read=<T,>(request:IDBRequest<T>)=>new Promise<T>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
 function requests(tx:IDBTransaction,projectId:string){
   return {
     project:tx.objectStore('projects').get(projectId),evaluations:tx.objectStore('evaluations').index('projectId').getAll(projectId),
     assets:tx.objectStore('assets').index('projectId').getAll(projectId),walkthroughs:tx.objectStore('walkthroughs').index('projectId').getAll(projectId),
     experiences:tx.objectStore('experiences').index('projectId').getAll(projectId),quality:tx.objectStore('qualityStates').get(projectId),
-    snapshots:tx.objectStore('snapshots').index('projectId').getAll(projectId),audits:tx.objectStore('stageReceipts').index('projectId').getAll(projectId)
+    snapshots:tx.objectStore('snapshots').index('projectId').getAll(projectId),audits:tx.objectStore('stageReceipts').index('projectId').getAll(projectId),
+    references:tx.objectStore('referenceRevisions').index('projectId').getAll(projectId)
   };
 }
 function materialize(r:ReturnType<typeof requests>):ArchiveSource {
   const project=r.project.result as Project|undefined;if(!project)throw new Error('项目已不存在');
-  const bundle:ProjectBundle={project,evaluations:r.evaluations.result as Evaluation[],assets:r.assets.result as AssetMetadata[],walkthroughs:r.walkthroughs.result as Walkthrough[],experiences:r.experiences.result as Experience[],...(r.quality.result?{quality:r.quality.result.state}:{})};
+  const bundle:ProjectBundle={project,evaluations:r.evaluations.result as Evaluation[],assets:r.assets.result as AssetMetadata[],walkthroughs:r.walkthroughs.result as Walkthrough[],experiences:r.experiences.result as Experience[],...(r.references.result.length?{referenceRevisions:r.references.result as ReferenceRevision[]}:{}),...(r.quality.result?{quality:r.quality.result.state}:{})};
   return {bundle,snapshots:r.snapshots.result.map((row:{project:Project})=>row.project),audits:r.audits.result as StageAudit[]};
 }
 export async function readArchiveSource(projectId:string):Promise<ArchiveSource>{
@@ -26,7 +27,7 @@ export async function readArchiveSource(projectId:string):Promise<ArchiveSource>
   if(trashed.result)throw new Error(PROJECT_TRASH_MESSAGE);return materialize(r);
 }
 function token(source:ArchiveSource){
-  return canonical({...source,bundle:{...source.bundle,evaluations:[...source.bundle.evaluations].sort((a,b)=>a.id.localeCompare(b.id)),assets:[...source.bundle.assets].sort((a,b)=>a.id.localeCompare(b.id))},snapshots:[...source.snapshots].sort((a,b)=>a.revision-b.revision),audits:[...source.audits].sort((a,b)=>a.id.localeCompare(b.id))});
+  return canonical({...source,bundle:{...source.bundle,evaluations:[...source.bundle.evaluations].sort((a,b)=>a.id.localeCompare(b.id)),assets:[...source.bundle.assets].sort((a,b)=>a.id.localeCompare(b.id)),...(source.bundle.referenceRevisions!==undefined?{referenceRevisions:[...source.bundle.referenceRevisions].sort((a,b)=>a.id.localeCompare(b.id))}:{})},snapshots:[...source.snapshots].sort((a,b)=>a.revision-b.revision),audits:[...source.audits].sort((a,b)=>a.id.localeCompare(b.id))});
 }
 export async function listArchives(projectId?:string):Promise<ArchiveRecord[]>{
   const db=await openDatabase(),store=db.transaction('archives').objectStore('archives');
