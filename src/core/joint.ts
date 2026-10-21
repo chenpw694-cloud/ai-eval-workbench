@@ -1,5 +1,6 @@
 import type { ProjectBundle, Scheme } from './model.ts';
 import { latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
+import type { RatingValidationOptions } from './ratings.ts';
 
 export type JointPolicy = { scenes: string[]; perScene: number; minimumQuestions: number };
 export type JointPlan = {
@@ -58,7 +59,7 @@ export function createJointPlan(bundle: ProjectBundle, questionIds: string[], se
   if (problems.length) throw new Error(problems.join('；'));
   return state;
 }
-export function validateJoint(raw: JointState | undefined, bundle: ProjectBundle): string[] {
+export function validateJoint(raw: JointState | undefined, bundle: ProjectBundle, options: RatingValidationOptions = {}): string[] {
   if (raw === undefined) return [];
   const errors: string[] = [];
   const plan = raw?.plan;
@@ -73,7 +74,7 @@ export function validateJoint(raw: JointState | undefined, bundle: ProjectBundle
   for (const questionId of plan.questionIds) for (const productId of plan.productIds) {
     const rows = plan.evidence.filter(row => row?.questionId === questionId && row.productId === productId);
     const row = rows[0], baseline = bundle.evaluations.find(e => e.id === row?.baselineId), asset = bundle.assets.find(a => a.id === row?.bestMediaId);
-    if (rows.length !== 1 || !baseline || baseline.questionId !== questionId || baseline.productId !== productId || baseline.status !== 'submitted' || validateEvaluation(bundle.project, baseline, bundle.assets).length || baseline.bestMediaId !== row.bestMediaId || !baseline.mediaIds.includes(row.bestMediaId) || baseline.schemeHash !== plan.schemeHash || baseline.questionsHash !== plan.questionsHash || !asset || asset.productId !== productId || asset.questionId !== questionId || asset.sha256 !== row.sha256) errors.push('联合样本最佳图或初评引用无效');
+    if (rows.length !== 1 || !baseline || baseline.questionId !== questionId || baseline.productId !== productId || baseline.status !== 'submitted' || validateEvaluation(bundle.project, baseline, bundle.assets, options).length || baseline.bestMediaId !== row.bestMediaId || !baseline.mediaIds.includes(row.bestMediaId) || baseline.schemeHash !== plan.schemeHash || baseline.questionsHash !== plan.questionsHash || !asset || asset.productId !== productId || asset.questionId !== questionId || asset.sha256 !== row.sha256) errors.push('联合样本最佳图或初评引用无效');
   }
   if (new Set(raw.rankings.map(row => row?.id)).size !== raw.rankings.length) errors.push('联合排名 ID 重复');
   for (const row of raw.rankings) {

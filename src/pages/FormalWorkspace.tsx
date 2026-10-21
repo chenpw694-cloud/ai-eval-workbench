@@ -449,13 +449,13 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
             const selected = task.tags.find(item => item.code === tag.code);
             return <div key={tag.code}><label><input type="checkbox" checked={!!selected} onChange={event => update(index, { tags: event.target.checked ? [...task.tags, { code: tag.code, severity: tag.severity }] : task.tags.filter(item => item.code !== tag.code) })}/>{tag.code} · {tag.name}</label>{selected && <select className="input" aria-label={`${walkthroughTasks[index].name}${tag.name}严重等级`} value={selected.severity} onChange={event => update(index, { tags: task.tags.map(item => item.code === tag.code ? { ...item, severity: event.target.value as TagAssignment['severity'] } : item) })}>{allowedSeverities(tag).map(level => <option key={level}>{level}</option>)}</select>}</div>;
           })}</div>
-          <label className="field">操作依据或问题说明<textarea className="input" rows={2} value={task.notes} onChange={event => update(index, { notes: event.target.value })} placeholder="记录执行过程和修改结果；未完成时说明原因。"/></label>
+          <label className="field">操作依据或问题说明（未完成时必填）<textarea className="input" rows={2} value={task.notes} onChange={event => update(index, { notes: event.target.value })} placeholder="记录执行过程和修改结果；未完成时说明原因。"/></label>
         </div>)}
       </section>
       <div className="formal-walk-bottom">
         <section className="panel formal-form-panel"><PanelHeading title="整体产品体验" subtitle={isAnchorMode(project.scheme) ? '与逐题 G 锚点分各占 G 维度的 50%。' : '与逐题 G 标签分各占 G 维度的 50%。'}/>
           <label className="field">整体体验分<select className="input" value={score} onChange={event => { setScore(event.target.value); setDirty(true); }}><option value="">尚未打分</option><option value="5">5 · 操作顺畅，无需摸索</option><option value="4">4 · 少量不便，不影响完成</option><option value="3">3 · 需要摸索，或步骤偏多</option><option value="2">2 · 操作困难，勉强完成</option><option value="1">1 · 无法完成任务</option></select></label>
-          <label className="field">体验依据<textarea className="input" rows={3} value={experienceNotes} onChange={event => { setExperienceNotes(event.target.value); setDirty(true); }}/></label>
+          <label className="field">体验依据（选填）<textarea className="input" rows={3} value={experienceNotes} onChange={event => { setExperienceNotes(event.target.value); setDirty(true); }}/></label>
           <label className="field">评测期间总花费（统一币种）<input className="input" type="number" min="0" step="0.01" placeholder="未知留空；免费请明确填 0" value={cost} onChange={event => { setCost(event.target.value); setDirty(true); }}/></label>
         </section>
         <section className="panel formal-form-panel"><PanelHeading title="商用授权检查" subtitle="未检查不等于已允许；明确不允许或条款不明确会触发一票否决。"/>

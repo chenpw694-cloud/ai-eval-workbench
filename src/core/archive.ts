@@ -2,7 +2,8 @@ import { isAnchorMode } from './ratings.ts';
 import type { Asset, Project, ProjectBundle, StageAudit } from './model.ts';
 import { buildStagePackage, hashBlob, readStagePackage } from './packages.ts';
 import { buildReport, reportMarkdown } from './report.ts';
-import type { Report, ReportBasis, ReportCheck } from './report.ts';
+import type { Report, ReportBasis, ReportCheck, ReportVersion } from './report.ts';
+import type { RatingValidationOptions } from './ratings.ts';
 import { canonicalJoint } from './joint.ts';
 import { latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
 import { latestQuality, validateQuality } from './quality.ts';
@@ -13,6 +14,7 @@ export type ArchiveSource = { bundle: ProjectBundle; snapshots: Project[]; audit
 export type ArchiveManifest = {
   format: 'eval-studio-final-archive'; schemaVersion: 1; archiveId: string; projectId: string; projectName: string;
   calculationVersion: 'ecommerce-v1' | 'ecommerce-anchors-v1';
+  reportVersion?: ReportVersion;
   mode: ArchiveMode; basis: ReportBasis; createdAt: string; operatorId: string; reason: string; demo: boolean;
   confirmations: { scope: boolean; conclusions: boolean; features: boolean };
   scope: { realProductIds: string[]; simulatedProductIds: string[]; questionCount: number; selfConfigured: boolean };
@@ -41,8 +43,8 @@ export function archiveContent(bundle: ProjectBundle): unknown {
 }
 export const archiveContentHash = (bundle: ProjectBundle) => hashValue(archiveContent(bundle));
 
-export function archiveReadiness(bundle: ProjectBundle, basis: ReportBasis, createdAt: string, input: Pick<ArchiveInput,'scopeConfirmed'|'featuresConfirmed'|'conclusionsConfirmed'|'demo'>, mediaVerified = false) {
-  const report = buildReport(bundle, basis, createdAt, input.demo);
+export function archiveReadiness(bundle: ProjectBundle, basis: ReportBasis, createdAt: string, input: Pick<ArchiveInput,'scopeConfirmed'|'featuresConfirmed'|'conclusionsConfirmed'|'demo'>, mediaVerified = false, options: RatingValidationOptions = {}) {
+  const report = buildReport(bundle, basis, createdAt, input.demo, options);
   const checks = report.checks.map(check => check.id === 'media' ? {...check, passed:mediaVerified, detail:mediaVerified?'本次归档的全部原图已读取并完成 SHA-256 校验，清单与所有 ZIP 必须一起保存。':'生成归档时逐图校验；当前尚未生成完整文件组。'} : check);
   const heads = latestEvaluations(bundle.evaluations);
   const state = bundle.quality;
@@ -63,7 +65,7 @@ export function archiveReadiness(bundle: ProjectBundle, basis: ReportBasis, crea
   checks.push({id:'final-source',title:'最终引用仍适用于当前记录',passed:!staleFinals.length,detail:`${staleFinals.length} 条最终引用已失效；历史裁决不能覆盖新的初评或独立判断。`});
   const unfinished = bundle.project.products.filter(product=>!product.demo).flatMap(product=>bundle.project.questions.flatMap(question=>{
     const row=heads.find(r=>r.productId===product.id&&r.questionId===question.id);
-    return row&&row.status==='submitted'&&!validateEvaluation(bundle.project,row,bundle.assets).length?[]:[`${product.name}/${question.id}`];
+    return row&&row.status==='submitted'&&!validateEvaluation(bundle.project,row,bundle.assets,options).length?[]:[`${product.name}/${question.id}`];
   }));
   checks.push({id:'all-primary',title:'已配置真实产品的全部初评',passed:!unfinished.length,detail:unfinished.length?`${unfinished.length} 份缺失、草稿或无效初评`:'当前配置范围的真实产品全部有效提交；模拟对象仅供单独比较。'});
   checks.push({id:'scope-confirmed',title:'确认本次归档范围',passed:input.scopeConfirmed,detail:'归档仅涵盖当前配置的产品与题量；未配置自家时不声称完成原四产品 GSB 方案。'});
@@ -75,9 +77,10 @@ function archiveReport(report: Report, manifest: Pick<ArchiveManifest,'archiveId
   return { ...report,format:'eval-studio-archived-report',status:manifest.mode==='final'?'final':'checkpoint',archiveId:manifest.archiveId,sourceHash:manifest.sourceHash,checks:manifest.checks,
     scope:manifest.mode==='final'?'当前配置范围的最终归档报告，模拟数据单列':'阶段快照报告，保留未完成项，不代表最终评测完成' };
 }
-function archivedMarkdown(report: Report, manifest: Pick<ArchiveManifest,'archiveId'|'mode'|'sourceHash'|'checks'>): string {
+function archivedMarkdown(report: Report, manifest: Pick<ArchiveManifest,'archiveId'|'mode'|'sourceHash'|'checks'|'reportVersion'>): string {
   const label = manifest.mode==='final'?'最终归档报告':'阶段快照报告';
-  const lines = reportMarkdown({...report,checks:manifest.checks}).split('\n');
+  // Archives created before this field existed must retain their exact original text.
+  const lines = reportMarkdown({...report,checks:manifest.checks}, manifest.reportVersion ?? 'report-v1').split('\n');
   lines[0]=`# ${report.project.name} · ${report.demo?'界面演示 · ':''}${label}`;
   lines[2]=manifest.mode==='final'?'> 本报告固定于本次归档的数据快照。后续工作项目修改不会改变这份文件；模拟对象与真实对象分别展示。':'> 阶段快照保留当前缺口，不代表最终评测完成。';
   const last=lines.findIndex(line=>line.startsWith('本文件及 JSON 明细不包含原图'));
@@ -85,12 +88,12 @@ function archivedMarkdown(report: Report, manifest: Pick<ArchiveManifest,'archiv
   lines.splice(4,0,`归档编号：${manifest.archiveId}`,`数据快照 SHA-256：${manifest.sourceHash}`,'');
   return lines.join('\n');
 }
-function validateInput(bundle: ProjectBundle, input: ArchiveInput) {
+function validateInput(bundle: ProjectBundle, input: ArchiveInput, options: RatingValidationOptions = {}) {
   if (!['checkpoint','final'].includes(input.mode)||!['original','adjudicated-reference'].includes(input.basis)||!bundle.project.members.some(m=>m.id===input.operatorId)||typeof input.reason!=='string'||!input.reason.trim()||input.reason.length>10000||['scopeConfirmed','featuresConfirmed','conclusionsConfirmed','demo'].some(key=>typeof input[key as keyof ArchiveInput]!=='boolean')) throw new Error('请选择负责人、归档类型并填写归档说明');
   if(bundle.quality?.space)throw new Error('独立评审任务不能作为完整项目归档');
   const preparation=validateProject(bundle.project);
   if(preparation.length)throw new Error(`版本归档需先完成配置并确认规则：${preparation.slice(0,4).join('；')}。配置草稿可使用项目备份保存。`);
-  const qualityErrors=validateQuality(bundle.quality,bundle);if(qualityErrors.length)throw new Error(qualityErrors.join('；'));
+  const qualityErrors=validateQuality(bundle.quality,bundle,options);if(qualityErrors.length)throw new Error(qualityErrors.join('；'));
 }
 export async function buildFinalArchive(source: ArchiveSource, input: ArchiveInput, loader: (id:string)=>Promise<Asset|undefined>, options: {archiveId?:string;now?:string;partBytes?:number}={}) : Promise<ArchiveRecord> {
   const frozen=structuredClone(source),bundle=frozen.bundle;
@@ -102,7 +105,7 @@ export async function buildFinalArchive(source: ArchiveSource, input: ArchiveInp
   const stage=await buildStagePackage({bundle,snapshots:frozen.snapshots,audits:frozen.audits,kind:'baseline',senderId:input.operatorId,productIds:bundle.project.products.map(p=>p.id)},loader,{packageId:archiveId,now:createdAt,partBytes:options.partBytes});
   const sourceHash=await archiveContentHash(bundle);
   const checked=archiveReadiness(bundle,input.basis,createdAt,input,true);
-  const manifest:ArchiveManifest={format:'eval-studio-final-archive',schemaVersion:1,calculationVersion:isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1',archiveId,projectId:bundle.project.id,projectName:bundle.project.name,mode:input.mode,basis:input.basis,createdAt,operatorId:input.operatorId,reason:input.reason.trim(),demo:input.demo,
+  const manifest:ArchiveManifest={format:'eval-studio-final-archive',schemaVersion:1,calculationVersion:isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1',reportVersion:'report-v2',archiveId,projectId:bundle.project.id,projectName:bundle.project.name,mode:input.mode,basis:input.basis,createdAt,operatorId:input.operatorId,reason:input.reason.trim(),demo:input.demo,
     confirmations:{scope:input.scopeConfirmed,conclusions:input.conclusionsConfirmed,features:input.featuresConfirmed},scope:{realProductIds:bundle.project.products.filter(p=>!p.demo).map(p=>p.id),simulatedProductIds:bundle.project.products.filter(p=>p.demo).map(p=>p.id),questionCount:bundle.project.questions.length,selfConfigured:bundle.project.products.some(p=>p.role==='self')},sourceHash,stageManifestHash:stage.manifest.manifestHash,checks:checked.checks,files:[],manifestHash:''};
   const reportJson=jsonBlob(archiveReport(checked.report,manifest));
   const files:ArchiveFile[]=[...stage.files,{name:`${archiveId}.report.json`,blob:reportJson},{name:`${archiveId}.report.md`,blob:new Blob([archivedMarkdown(checked.report,manifest)],{type:'text/markdown;charset=utf-8'})}];
@@ -124,6 +127,7 @@ export async function readFinalArchive(files: File[]): Promise<{record:ArchiveRe
   if(!object(raw)||raw.format!=='eval-studio-final-archive'||raw.schemaVersion!==1||!identity(raw.archiveId)||headers[0].name!==`${raw.archiveId}.archive.json`||typeof raw.projectId!=='string'||typeof raw.projectName!=='string'||!['checkpoint','final'].includes(String(raw.mode))||!['original','adjudicated-reference'].includes(String(raw.basis))||typeof raw.createdAt!=='string'||!Number.isFinite(Date.parse(raw.createdAt))||typeof raw.operatorId!=='string'||typeof raw.reason!=='string'||!raw.reason.trim()||raw.reason.length>10000||typeof raw.demo!=='boolean'||!hash(raw.sourceHash)||!hash(raw.stageManifestHash)||!hash(raw.manifestHash)||!validConfirmations(raw.confirmations)||!object(raw.scope)||!Array.isArray(raw.checks)||!Array.isArray(raw.files)||raw.files.length>259)throw new Error('归档清单结构、标识或口径无效');
   const manifest=raw as unknown as ArchiveManifest;
   if(!['ecommerce-v1','ecommerce-anchors-v1'].includes(manifest.calculationVersion))throw new Error('此归档计算版本暂不支持，请使用对应版本工作台校验');
+  if(manifest.reportVersion!==undefined&&!['report-v1','report-v2'].includes(manifest.reportVersion))throw new Error('此归档报告版本暂不支持，请使用对应版本工作台校验');
   const {manifestHash:_hash,...unsigned}=manifest;if(await hashValue(unsigned)!==manifest.manifestHash)throw new Error('归档清单 SHA-256 校验失败');
   if(new Set(manifest.files.map(row=>row?.name)).size!==manifest.files.length||files.length!==manifest.files.length+1)throw new Error('归档缺少文件、混入额外文件或清单存在重名');
   for(const row of manifest.files){
@@ -138,10 +142,11 @@ export async function readFinalArchive(files: File[]): Promise<{record:ArchiveRe
   const bundle=stage.manifest.bundle;
   if(manifest.calculationVersion!==(isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1'))throw new Error('归档计算版本与评分方式不一致');
   const input:ArchiveInput={mode:manifest.mode,basis:manifest.basis,operatorId:manifest.operatorId,reason:manifest.reason,demo:manifest.demo,scopeConfirmed:manifest.confirmations.scope,featuresConfirmed:manifest.confirmations.features,conclusionsConfirmed:manifest.confirmations.conclusions};
-  validateInput(bundle,input);
+  const reportOptions:RatingValidationOptions={legacyRequiredReasons:manifest.reportVersion===undefined||manifest.reportVersion==='report-v1'};
+  validateInput(bundle,input,reportOptions);
   const expectedScope={realProductIds:bundle.project.products.filter(p=>!p.demo).map(p=>p.id),simulatedProductIds:bundle.project.products.filter(p=>p.demo).map(p=>p.id),questionCount:bundle.project.questions.length,selfConfigured:bundle.project.products.some(p=>p.role==='self')};
   if(stage.manifest.kind!=='baseline'||stage.manifest.packageId!==manifest.archiveId||stage.manifest.exportedAt!==manifest.createdAt||stage.manifest.senderId!==manifest.operatorId||stage.manifest.manifestHash!==manifest.stageManifestHash||bundle.project.id!==manifest.projectId||bundle.project.name!==manifest.projectName||await archiveContentHash(bundle)!==manifest.sourceHash||canonicalJoint(expectedScope)!==canonicalJoint(manifest.scope))throw new Error('归档项目、范围或数据快照与清单不同');
-  const check=archiveReadiness(bundle,manifest.basis,manifest.createdAt,input,true);
+  const check=archiveReadiness(bundle,manifest.basis,manifest.createdAt,input,true,reportOptions);
   if(canonicalJoint(check.checks)!==canonicalJoint(manifest.checks)||manifest.mode==='final'&&check.blockers.length)throw new Error('归档检查结果不符或未满足最终归档条件');
   const report=archiveReport(check.report,manifest);
   let reportRaw:unknown;try{reportRaw=JSON.parse(await jsonFile.text());}catch{throw new Error('归档报告 JSON 无效');}

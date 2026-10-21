@@ -8,6 +8,7 @@ import { createQualityBatch, emptyQuality } from '../src/core/quality.ts';
 import { createJointPlan } from '../src/core/joint.ts';
 import { emptyReportNotes } from '../src/core/report-notes.ts';
 import { hashBlob } from '../src/core/packages.ts';
+import { buildReport, reportMarkdown } from '../src/core/report.ts';
 const stamp='2026-10-20T12:00:00.000Z';let seq=0;const id=()=>`a-${++seq}`;
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=','base64');
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -40,6 +41,16 @@ async function altered(record,mutate){
  const result=list.filter(f=>f.name!==header.name);result.push(new File([JSON.stringify(manifest)],header.name));return result;
 }
 async function replaceContent(manifest,list,role,content){const entry=manifest.files.find(e=>e.role===role),blob=new Blob([content]);entry.size=blob.size;entry.sha256=await hashBlob(blob);list.splice(list.findIndex(f=>f.name===entry.name),1,new File([blob],entry.name));}
+function legacyArchivedMarkdown(source, manifest) {
+ const report=buildReport(source.bundle,manifest.basis,manifest.createdAt,manifest.demo,{legacyRequiredReasons:true});
+ const lines=reportMarkdown({...report,checks:manifest.checks},'report-v1').split('\n');
+ lines[0]=`# ${report.project.name} · ${report.demo?'界面演示 · ':''}${manifest.mode==='final'?'最终归档报告':'阶段快照报告'}`;
+ lines[2]=manifest.mode==='final'?'> 本报告固定于本次归档的数据快照。后续工作项目修改不会改变这份文件；模拟对象与真实对象分别展示。':'> 阶段快照保留当前缺口，不代表最终评测完成。';
+ const last=lines.findIndex(line=>line.startsWith('本文件及 JSON 明细不包含原图'));
+ if(last>=0)lines[last]='原图已随本次归档的项目清单与 ZIP 分包提供；报告单独保存不能恢复项目。';
+ lines.splice(4,0,`归档编号：${manifest.archiveId}`,`数据快照 SHA-256：${manifest.sourceHash}`,'');
+ return lines.join('\n');
+}
 
 test('checkpoint freezes report, metadata and verified originals without pretending completion',async()=>{const source=setup(),record=await build(source);assert.equal(record.manifest.mode,'checkpoint');assert.equal(record.files.length,5);assert.ok(record.manifest.checks.some(c=>!c.passed));assert.equal(record.manifest.checks.find(c=>c.id==='media').passed,true);const read=await readFinalArchive(files(record));assert.equal(read.report.status,'checkpoint');assert.equal(read.blobs.size,1);assert.ok((await record.files.find(f=>f.name.endsWith('.md')).blob.text()).includes('不代表最终评测完成'));});
 test('final archive rejects partial quality, trials and missing confirmations before loading images',async()=>{const source=setup();let loaded=false;await assert.rejects(()=>buildFinalArchive(source,input({mode:'final'}),async()=>{loaded=true;return undefined;}),/暂不能最终归档/);assert.equal(loaded,false);const full=setup(true);await assert.rejects(()=>build(full,{mode:'final',featuresConfirmed:false}),/负责人核实/);});
@@ -60,3 +71,74 @@ test('manifest digest itself is verifiable independently of JSON key order',asyn
 test('unprepared configuration uses regular draft backup rather than an unmergeable archive',async()=>{const source=setup();source.bundle.project.rulesConfirmed=false;await assert.rejects(()=>build(source),/配置草稿可使用项目备份/);});
 
 test('complete anchor workflow creates a final archive without changing legacy archive semantics',async()=>{const source=setup(true,true);assert.deepEqual(archiveReadiness(source.bundle,'original',stamp,input(),true).blockers,[]);const record=await build(source,{mode:'final'});assert.equal(record.manifest.calculationVersion,'ecommerce-anchors-v1');const read=await readFinalArchive(files(record));assert.equal(read.report.status,'final');assert.equal(read.bundle.evaluations[0].ratings.A.score,5);assert.match(await record.files.find(f=>f.name.endsWith('.report.md')).blob.text(),/总分 \/5/);});
+
+test('new anchor archives roundtrip optional empty reasons and render clean score lines',async()=>{
+ const source=setup(true,true);
+ for(const row of [...source.bundle.evaluations,...source.bundle.walkthroughs,...source.bundle.quality.judgments,...source.bundle.quality.decisions])for(const rating of Object.values(row.ratings??{}))rating.reason='';
+ source.bundle.evaluations[0].ratings.B.reason='   ';
+ const record=await build(source,{mode:'final'}),read=await readFinalArchive(files(record));
+ assert.equal(record.manifest.reportVersion,'report-v2');
+ assert.equal(record.manifest.calculationVersion,'ecommerce-anchors-v1');
+ assert.equal(read.report.status,'final');
+ assert.equal(read.bundle.evaluations[0].ratings.A.reason,'');
+ assert.equal(read.bundle.walkthroughs[0].ratings.D.reason,'');
+ assert.equal(read.bundle.quality.judgments[0].ratings.A.reason,'');
+ const md=await record.files.find(file=>file.name.endsWith('.report.md')).blob.text();
+ assert.match(md,/评分依据选填/);
+ const scoreLines=md.split('\n').filter(line=>/^- .* \/ [ABCFG]：/.test(line));
+ assert(scoreLines.length>0);
+ assert(scoreLines.every(line=>/：5 分$/.test(line)));
+});
+
+test('old anchor archives without a rendering marker retain exact original Markdown verification',async()=>{
+ const source=setup(false,true),record=await build(source);
+ const legacyFiles=await altered(record,async(manifest,list)=>{
+  delete manifest.reportVersion;
+  const md=legacyArchivedMarkdown(source,manifest);
+  assert.match(md,/选 1–5 分并填写依据/);
+  assert.doesNotMatch(md,/评分依据选填/);
+  await replaceContent(manifest,list,'report-md',md);
+ });
+ const read=await readFinalArchive(legacyFiles);
+ assert.equal(read.record.manifest.reportVersion,undefined);
+ assert.equal(read.record.manifest.calculationVersion,'ecommerce-anchors-v1');
+ assert.equal(read.bundle.evaluations[0].ratings.A.reason,'合成评分依据');
+ assert.equal(read.report.results[0].dimensions.A.value,5);
+ const onlyRelabelled=await altered(record,manifest=>{delete manifest.reportVersion;});
+ await assert.rejects(()=>readFinalArchive(onlyRelabelled),/报告内容/);
+});
+
+test('unknown report renderer cannot bypass archive semantic checks after re-signing',async()=>{
+ const record=await build(setup());
+ const future=await altered(record,manifest=>{manifest.reportVersion='report-v99';});
+ await assert.rejects(()=>readFinalArchive(future),/报告版本/);
+});
+
+test('old checkpoints retain invalid empty reasons and missing scores without gaining newly valid submissions',async()=>{
+ const source=setup(false,true);
+ source.bundle.evaluations[0].ratings.A.reason='';
+ delete source.bundle.evaluations[1].ratings.G;
+ source.bundle.walkthroughs[0].ratings.D.reason='';
+ source.bundle.evaluations[2].seconds=null;
+ const record=await build(source);
+ const legacyFiles=await altered(record,async(manifest,list)=>{
+  delete manifest.reportVersion;
+  const checked=archiveReadiness(source.bundle,manifest.basis,manifest.createdAt,input(),true,{legacyRequiredReasons:true});
+  manifest.checks=checked.checks;
+  const jsonFile=list.find(file=>file.name.endsWith('.report.json'));
+  const archived=JSON.parse(await jsonFile.text());
+  Object.assign(archived,checked.report,{format:archived.format,status:archived.status,scope:archived.scope,checks:manifest.checks});
+  await replaceContent(manifest,list,'report-json',JSON.stringify(archived));
+  await replaceContent(manifest,list,'report-md',legacyArchivedMarkdown(source,manifest));
+ });
+ const legacy=await readFinalArchive(legacyFiles);
+ assert.equal(legacy.report.results[0].submitted,0);
+ assert.equal(legacy.report.results[0].dimensions.D.n,2);
+ assert(legacy.report.results[0].missing.some(message=>message.includes('G 维度尚未按锚点打分并填写依据')));
+ assert(legacy.report.results[0].missing.some(message=>message.includes('A 维度分数或评分依据无效')));
+ assert(legacy.report.results[1].missing.some(message=>message.includes('生成耗时须为大于或等于 0 的有限秒数')));
+ assert.equal(legacy.bundle.evaluations[0].ratings.A.reason,'');
+ const current=await readFinalArchive(files(record));
+ assert.equal(current.report.results[0].submitted,1);
+ assert.equal(current.report.results[0].dimensions.D.n,3);
+});

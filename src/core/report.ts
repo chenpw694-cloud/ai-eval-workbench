@@ -1,4 +1,5 @@
 import { isAnchorMode, recordDimensionScore } from './ratings.ts';
+import type { RatingValidationOptions } from './ratings.ts';
 import type { DimensionId, ProjectBundle } from './model.ts';
 import { latestEvaluations, summarizeProject, validateEvaluation, validateProject } from './assessment.ts';
 import { judgmentDisagreement, finalQualityBundle, latestQuality, qualitySummary, validateQuality } from './quality.ts';
@@ -6,16 +7,18 @@ import { jointSummary, latestRankings } from './joint.ts';
 import { latestReportNotes } from './report-notes.ts';
 
 export type ReportBasis = 'original' | 'adjudicated-reference';
+/** Frozen archives bind both validation policy and text; ordinary exports use the current version. */
+export type ReportVersion = 'report-v1' | 'report-v2';
 export type ReportCheck = { id: string; title: string; passed: boolean; detail: string };
 const pct = (value: number | null) => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
 const num = (value: number | null, digits = 2) => value === null ? '—' : value.toFixed(digits);
-export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generatedAt: string, demo = false) {
+export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generatedAt: string, demo = false, options: RatingValidationOptions = {}) {
   const state = bundle.quality;
   const notes = latestReportNotes(state?.reportNotes);
   const source = basis === 'adjudicated-reference' ? finalQualityBundle(bundle) : bundle;
-  const results = summarizeProject(source);
+  const results = summarizeProject(source, options);
   const real = bundle.project.products.filter(p => !p.demo);
-  const quality = qualitySummary(bundle), joint = jointSummary(bundle);
+  const quality = qualitySummary(bundle, options), joint = jointSummary(bundle);
   const heads = latestEvaluations(bundle.evaluations);
   const originalHeads = heads.filter(row => row.status === 'submitted' && row.notes.trim());
   const checks: ReportCheck[] = [];
@@ -43,7 +46,7 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
   const decisions = latestQuality(state?.decisions ?? [], row => row.taskId);
   const missingFinals = tasks.filter(task => ['review','recheck'].includes(task.kind)).filter(task => {
     const judgment = judgments.find(row => row.taskId === task.id), original = bundle.evaluations.find(row => row.id === task.evidence[0]?.baselineId);
-    if (!judgment || judgment.unable || !original || !judgmentDisagreement(original, judgment, bundle)) return false;
+    if (!judgment || judgment.unable || !original || !judgmentDisagreement(original, judgment, bundle, options)) return false;
     const decision = decisions.find(row => row.taskId === task.id && row.judgmentId === judgment.id);
     return !decision || !state?.finals?.some(ref => ref.baselineId === original.id && ref.decisionId === decision.id);
   });
@@ -64,15 +67,15 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
   const caseIds = notes?.caseQuestionIds ?? [];
   const ranks = latestRankings(state?.joint?.rankings ?? []);
   add('cases', '典型案例', caseIds.length >= 3 && caseIds.length <= 5 && caseIds.every(id => ranks.some(row => row.questionId === id && !row.unable)), `${caseIds.length} 组案例；正式报告从已完成联合排名中选择 3–5 组`);
-  const structural = validateQuality(state, bundle);
+  const structural = validateQuality(state, bundle, options);
   add('structure', '修订与引用完整性', !structural.length, structural.join('；') || '联合排名、独立判断及报告草稿修订链未发现分叉');
   add('media', '原图备份', false, '本报告不包含原图字节；请另导出并保存“汇总主包”的清单与全部 ZIP。导出主包时逐图校验 SHA-256，本页不将元数据视为原图备份成功。');
-  const valid = latestEvaluations(source.evaluations).filter(r => r.status === 'submitted' && r.schemeHash === source.project.schemeHash && r.questionsHash === source.project.questionsHash && !validateEvaluation(source.project, r, source.assets).length);
+  const valid = latestEvaluations(source.evaluations).filter(r => r.status === 'submitted' && r.schemeHash === source.project.schemeHash && r.questionsHash === source.project.questionsHash && !validateEvaluation(source.project, r, source.assets, options).length);
   const groups = (field: 'scene' | 'category' | 'difficulty') => [...new Set(bundle.project.questions.map(q => q[field]))].map(value => ({ value, products: real.map(product => {
     const expected = bundle.project.questions.filter(q => q[field] === value).length;
     const rows = valid.filter(r => r.productId === product.id && bundle.project.questions.find(q => q.id === r.questionId)?.[field] === value);
     const dimensions = Object.fromEntries(['A','B','C','F'].map(dim => {
-      const scores = rows.flatMap(r => r.failed && !r.mediaIds.length ? bundle.project.scheme.policies.failedNoOutput === 'score-one' ? [1] : [] : [recordDimensionScore(bundle.project.scheme, r, dim)!]);
+      const scores = rows.flatMap(r => r.failed && !r.mediaIds.length ? bundle.project.scheme.policies.failedNoOutput === 'score-one' ? [1] : [] : [recordDimensionScore(bundle.project.scheme, r, dim, options)!]);
       return [dim, { value: scores.length ? scores.reduce((a,b) => a+b,0)/scores.length : null, n: scores.length }];
     }));
     return { productId: product.id, expected, submitted: rows.length, dimensions };
@@ -97,11 +100,14 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
 }
 export type Report = ReturnType<typeof buildReport>;
 const cell = (value: unknown) => String(value ?? '—').replace(/\|/g,'\\|').replace(/[\r\n]+/g,' ');
-export function reportMarkdown(report: Report): string {
+export function reportMarkdown(report: Report, reportVersion: ReportVersion = 'report-v2'): string {
   const product = (id: string) => report.project.products.find(p => p.id === id)?.name ?? id;
   const notes = report.notes;
   const lines = [`# ${report.project.name} · ${report.demo ? '界面演示报告' : '报告草稿'}`, '', '> 草稿，不代表项目已完成归档。缺失数据保留为空；原图需另存汇总主包。', '', `生成时间：${report.generatedAt}`, `统计口径：${report.basis === 'original' ? '原始初评' : '裁决口径参考分'}`, `规则：${report.project.schemeHash}`, `题库：${report.project.questionsHash}`, '', '## 结论与建议', '', notes?.summary || '待填写', '', '### 产品优势与短板', '', notes?.productInsights || '待填写', '', '### 对自家产品的启示', '', notes?.recommendations || '待填写', '', '## 综合对比', '', `| 产品 | 数据性质 | A | B | C | D | E | F | G | 总分 /${isAnchorMode(report.project.scheme) ? '5' : '100'} | 可用率 | 平均秒 | 可用图成本 | 推荐状态 |`, '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
-  const methods = ['## 评测方法', '', `项目背景：${report.project.background || '待填写'}`, `评测周期：${report.project.period || '待填写'}`, `评测集：${report.project.questions.length} 题；${report.project.members.length} 名成员；${report.project.products.filter(p=>!p.demo).length} 个真实对比对象。`, `维度权重：${report.project.scheme.dimensions.map(d=>`${d.id} ${d.name} ${d.weight}%`).join('；')}`, isAnchorMode(report.project.scheme) ? '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分并填写依据；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。' : '图像维度按该维度最严重标签换算 1–5 分；D 为固定编辑走查，E 为可用率/速度/成本，G 为逐题体验标签与整体走查各占一半。', '共同校准、独立复评、一致率及全量复查状态见下方检查；分组结果仅代表实际有效样本，不进行缺失值填补。', ''];
+  const anchorMethod = reportVersion === 'report-v1'
+    ? '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分并填写依据；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。'
+    : '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分，评分依据选填；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。';
+  const methods = ['## 评测方法', '', `项目背景：${report.project.background || '待填写'}`, `评测周期：${report.project.period || '待填写'}`, `评测集：${report.project.questions.length} 题；${report.project.members.length} 名成员；${report.project.products.filter(p=>!p.demo).length} 个真实对比对象。`, `维度权重：${report.project.scheme.dimensions.map(d=>`${d.id} ${d.name} ${d.weight}%`).join('；')}`, isAnchorMode(report.project.scheme) ? anchorMethod : '图像维度按该维度最严重标签换算 1–5 分；D 为固定编辑走查，E 为可用率/速度/成本，G 为逐题体验标签与整体走查各占一半。', '共同校准、独立复评、一致率及全量复查状态见下方检查；分组结果仅代表实际有效样本，不进行缺失值填补。', ''];
   lines.splice(lines.indexOf('## 综合对比'), 0, ...methods);
   for (const row of report.results) lines.push(`| ${cell(product(row.productId))} | ${report.project.products.find(p=>p.id===row.productId)?.demo ? '模拟' : '真实对象'} | ${(['A','B','C','D','E','F','G'] as DimensionId[]).map(id=>`${num(row.dimensions[id].value)} (${row.dimensions[id].n}/${row.dimensions[id].expected})`).join(' | ')} | ${num(row.total === null ? null : row.total*(isAnchorMode(report.project.scheme)?1:20),isAnchorMode(report.project.scheme)?2:1)} | ${pct(row.usableRate)} | ${num(row.meanSeconds,1)} | ${num(row.costPerUsable,3)} | ${cell(row.eligibility)}${row.vetoReasons.length ? '：'+cell(row.vetoReasons.join('；')) : ''} |`);
   lines.push('', '维度值后的括号为已计入数量 / 应计数量；未齐全的维度仅作参考。完整总分需七维数据齐全。分组只列可按题汇总的 A/B/C/F，不把产品级 D/E/G 冒充为场景总分。', '', '## 分场景表现', '', '| 场景 | 产品 | 提交 | A | B | C | F |', '|---|---|---|---|---|---|---|');
@@ -123,6 +129,6 @@ export function reportMarkdown(report: Report): string {
     lines.push('', ranking?.reason || '尚无共同判断', '');
   }
   lines.push('## 局限与备注处理', '', notes?.limitations || '待填写', '', notes?.noteResolution || '尚无备注处理说明', '', '## 交付前检查', '', ...report.checks.map(check=>`- [${check.passed?'x':' '}] ${check.title}：${check.detail}`), '', '参与人：'+(notes?.participants.map(id=>report.project.members.find(m=>m.id===id)?.name ?? id).join('、') || '尚未确认'), '', '本文件及 JSON 明细不包含原图，不能作为可恢复项目备份。请同时保存汇总主包、清单和全部 ZIP。');
-  if (isAnchorMode(report.project.scheme)) lines.push('', '## 锚点评分与依据', '', ...((report.anchorScores ?? []).flatMap(row => Object.entries(row.ratings ?? {}).map(([id,r]) => `- ${row.questionId} / ${product(row.productId)} / ${id}：${r.score} 分；${r.reason}`))));
+  if (isAnchorMode(report.project.scheme)) lines.push('', '## 锚点评分与依据', '', ...((report.anchorScores ?? []).flatMap(row => Object.entries(row.ratings ?? {}).map(([id,r]) => `- ${row.questionId} / ${product(row.productId)} / ${id}：${r.score} 分${reportVersion === 'report-v1' || r.reason.trim() ? `；${r.reason}` : ''}`))));
   return lines.join('\n');
 }

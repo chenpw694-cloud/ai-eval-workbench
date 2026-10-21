@@ -2,6 +2,8 @@ import type { DimensionRatings, Scheme, TagAssignment } from './model.ts';
 export const ratedDimensions = ['A', 'B', 'C', 'D', 'F', 'G'] as const;
 export const questionDimensions = ['A', 'B', 'C', 'F', 'G'];
 export const imageRatingDimensions = ['A', 'B', 'C', 'F'];
+/** Used only when verifying archives produced before scoring reasons became optional. */
+export type RatingValidationOptions = { legacyRequiredReasons?: boolean };
 export const isAnchorMode = (scheme: Scheme) => scheme.rating?.mode === 'anchors';
 const descriptions: Record<string, string[]> = {
   A: ['商品、卖点或上架要求严重错误，无法使用', '商品关键信息明显偏差，仅能参考，需重新生成', '基本符合电商场景，需较大修改后使用', '商品与卖点准确，微调排版或细节即可使用', '商品、卖点、版式和上架要求均满足，可直接使用'],
@@ -24,19 +26,20 @@ export function ratingSchemeErrors(scheme: Scheme): string[] {
     return !Array.isArray(rows) || rows.length !== 5 || [1,2,3,4,5].some(score => rows.filter(row => row && row.score === score && typeof row.description === 'string' && row.description.trim() && row.description.length <= 2000).length !== 1) ? [`${id} 维度需配置完整且不重复的 1–5 分锚点`] : [];
   });
 }
-export function ratingErrors(scheme: Scheme, ratings: unknown, dimensions: string[], required: boolean): string[] {
-  if (ratings === undefined) return required && isAnchorMode(scheme) ? dimensions.map(id => `${id} 维度尚未按锚点打分并填写依据`) : [];
+export function ratingErrors(scheme: Scheme, ratings: unknown, dimensions: string[], required: boolean, options: RatingValidationOptions = {}): string[] {
+  const missing = (id: string) => `${id} 维度尚未按锚点打分${options.legacyRequiredReasons ? '并填写依据' : ''}`;
+  if (ratings === undefined) return required && isAnchorMode(scheme) ? dimensions.map(missing) : [];
   if (!ratings || typeof ratings !== 'object' || Array.isArray(ratings)) return ['锚点评分结构无效'];
   const entries = Object.entries(ratings);
   if (!isAnchorMode(scheme) && entries.length) return ['标签换算方案不能混入直接评分'];
-  const errors = entries.flatMap(([id, row]) => !dimensions.includes(id) || !row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).some(key => !['score','reason'].includes(key)) || !Number.isInteger(row.score) || row.score < 1 || row.score > 5 || typeof row.reason !== 'string' || row.reason.length > 10000 || (required && !row.reason.trim()) ? [`${id} 维度分数或评分依据无效`] : []);
-  if (required && isAnchorMode(scheme)) for (const id of dimensions) if (!(id in ratings)) errors.push(`${id} 维度尚未按锚点打分并填写依据`);
+  const errors = entries.flatMap(([id, row]) => !dimensions.includes(id) || !row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).some(key => !['score','reason'].includes(key)) || !Number.isInteger(row.score) || row.score < 1 || row.score > 5 || typeof row.reason !== 'string' || row.reason.length > 10000 || (required && options.legacyRequiredReasons && !row.reason.trim()) ? [`${id} 维度分数或评分依据无效`] : []);
+  if (required && isAnchorMode(scheme)) for (const id of dimensions) if (!(id in ratings)) errors.push(missing(id));
   return errors;
 }
-export function recordDimensionScore(scheme: Scheme, record: { tags: TagAssignment[]; ratings?: DimensionRatings }, dimension: string): number | null {
+export function recordDimensionScore(scheme: Scheme, record: { tags: TagAssignment[]; ratings?: DimensionRatings }, dimension: string, options: RatingValidationOptions = {}): number | null {
   if (isAnchorMode(scheme)) {
     const value = record.ratings?.[dimension];
-    return value && !ratingErrors(scheme, { [dimension]: value }, [dimension], true).length ? value.score : null;
+    return value && !ratingErrors(scheme, { [dimension]: value }, [dimension], true, options).length ? value.score : null;
   }
   return Math.min(5, ...record.tags.filter(tag => scheme.tags.find(def => def.code === tag.code)?.dimension === dimension).map(tag => ({P0:1,P1:2,P2:3,P3:4})[tag.severity]));
 }

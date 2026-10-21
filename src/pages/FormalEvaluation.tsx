@@ -299,7 +299,12 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     if (nextStatus === 'submitted') {
       const validationErrors = validateEvaluation(project, record, [...bundle.assets, ...pendingAssets], { scope: 'task' });
       if (validationErrors.length) {
-        setErrors(validationErrors.map(error => outputs.reduce((message, asset, index) => message.replaceAll(asset.id, `第 ${index + 1} 张原图（${asset.name}）`), error)));
+        setErrors(validationErrors.map(error => {
+          const message = record.seconds === null && error === '生成耗时须为大于或等于 0 的有限秒数'
+            ? '尚未填写生成耗时：请在“生成记录 → 耗时 / 秒”补填，或先保存草稿并下一题。'
+            : error;
+          return outputs.reduce((text, asset, index) => text.replaceAll(asset.id, `第 ${index + 1} 张原图（${asset.name}）`), message);
+        }));
         onToast('尚未提交，请根据提示补全评测记录。');
         return;
       }
@@ -346,7 +351,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
 
   return <div className="formal-page">
     <header className="page-heading formal-heading">
-      <div><div className="eyebrow">EVALUATION WORKSPACE</div><h1>逐题评测</h1><p>对照需求与原始输出，保存每一次判断的依据。</p></div>
+      <div><div className="eyebrow">EVALUATION WORKSPACE</div><h1>逐题评测</h1><p>对照需求与原始输出，评分并保存每次评测记录。</p></div>
       <div className="formal-local"><span />原图与记录仅保存在本机<span className="pill">{product.demo ? '模拟产品' : '正式项目'}</span></div>
     </header>
     <div className={`formal-notice ${blockedReasons.length ? 'warning' : ''}`}><Info size={16} /><div>{blockedReasons.length ? <><strong>可先记录草稿</strong> · {blockedReasons.join('；')}，补齐后才能正式提交。</> : <><strong>独立评测</strong> · 上传本次生成的全部原图，逐张检查后选出最佳图。保存后可继续编辑，每次修订均保留历史。</>}</div></div>
@@ -430,7 +435,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           <div className="formal-score-note"><Info size={13} /><span>{isAnchorMode(project.scheme) ? '当前为锚点直评分；以下问题标签仅作诊断与风险检查，不换算分数。' : '草稿的空维度显示 —；正式提交后，无问题标签计 5 分。'}F、G 完整维度分还需结合逐图检查与走查记录。{failed && !outputs.length && <> 当前失败无输出：{project.scheme.policies.failedNoOutput === 'score-one' ? 'A / B / C / F 按已确认规则记 1 分。' : project.scheme.policies.failedNoOutput === 'exclude' ? 'A / B / C / F 按规则排除。' : '评分口径尚未确认。'}</>}</span></div>
           {selectedTags.some(tag => ['A03', 'B01'].includes(normalizeCode(tag.code))) && <p className="formal-warning-text">若涉及价格等关键信息错误或商品品类错误，请按规则将相应标签调整为 P0，并在备注中记录具体证据。</p>}
           <div className="formal-metrics-title"><Clock3 size={15} /><h3>生成记录</h3></div>
-          <div className="formal-metrics"><label className="formal-field"><span>耗时 / 秒</span><input type="number" min="0" step="any" value={seconds} placeholder="待填写" onChange={event => { setSeconds(event.target.value); edited(); }} /></label><div><span>总张数</span><strong>{outputs.length}</strong></div><div><span>可用张数</span><strong>{outputs.length && mediaChecks.every(check => check.usable != null) ? usableCount : '—'}</strong></div></div>
+          <div className="formal-metrics"><label className="formal-field"><span>耗时 / 秒 <small>提交必填</small></span><input type="number" min="0" step="any" value={seconds} placeholder="实际耗时" onChange={event => { setSeconds(event.target.value); edited(); }} /></label><div><span>总张数</span><strong>{outputs.length}</strong></div><div><span>可用张数</span><strong>{outputs.length && mediaChecks.every(check => check.usable != null) ? usableCount : '—'}</strong></div></div>
           <label className="formal-failed"><input type="checkbox" checked={failed} onChange={event => {
             const checked = event.target.checked;
             setFailed(checked);
