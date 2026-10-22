@@ -48,6 +48,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const [reviewerId, setReviewerId] = useState('');
   const [search, setSearch] = useState('');
   const [briefExpanded, setBriefExpanded] = useState(() => !latestEvaluations(bundle.evaluations).find(record => record.projectId === project.id && record.questionId === questionId && record.productId === productId)?.mediaIds.length);
+  const [contextChecksOpen, setContextChecksOpen] = useState(false);
   const [outputs, setOutputs] = useState<Asset[]>([]);
   const [references, setReferences] = useState<Asset[]>([]);
   const [referencePool, setReferencePool] = useState<AssetMetadata[]>([]);
@@ -77,7 +78,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const referenceHead = useRef<string | null>(null);
   const initialReferenceIds = useRef<string[]>([]);
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const evidenceRef = useRef<HTMLElement>(null);
+  const evidenceRef = useRef<HTMLDivElement>(null);
   const ratingScrollRef = useRef<HTMLDivElement>(null);
   const urls = useRef(new Map<string, string>());
   const dirtyRef = useRef(false);
@@ -131,6 +132,10 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   }, [dirty, busy]);
 
   useEffect(() => {
+    if (evidenceRef.current) evidenceRef.current.scrollTop = 0;
+  }, [briefExpanded]);
+
+  useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (!dirtyRef.current && !pendingRef.current) return;
       event.preventDefault();
@@ -165,6 +170,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     setErrors([]);
     setLoading(true);
     setBriefExpanded(!record?.mediaIds.length);
+    setContextChecksOpen(false);
     if (evidenceRef.current) evidenceRef.current.scrollTop = 0;
     if (ratingScrollRef.current) ratingScrollRef.current.scrollTop = 0;
     setReviewerId(record?.reviewerId ?? (current.project.members.some(member => member.id === selectedProduct?.ownerId) ? selectedProduct?.ownerId ?? '' : ''));
@@ -449,8 +455,17 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         <footer>切换题目、产品前请保存修改</footer>
       </aside>
 
-      <section className="formal-evidence" ref={evidenceRef} aria-label="题目与图片" tabIndex={0}>
-        <details className="panel formal-brief" open={briefExpanded}>
+      <section className="formal-evidence">
+        {!briefExpanded && <div className="panel formal-question-context" role="region" aria-label="当前题目摘要">
+          <div className="formal-context-heading"><div><span className="formal-context-id" title={question.id}>{question.id}</span><span className="formal-context-scene" title={question.title}>{question.scene || question.title}</span></div><div className="formal-context-actions">
+            {question.acceptance.length > 0 && <button aria-expanded={contextChecksOpen} aria-controls="formal-context-checks" onClick={() => setContextChecksOpen(previous => !previous)}>验收要点 <span>{question.acceptance.length}</span><ChevronRight size={12} className={contextChecksOpen ? 'open' : ''} /></button>}
+            <button onClick={() => setBriefExpanded(true)} aria-label="展开题目详情与参考图">展开详情<ChevronRight size={13} /></button>
+          </div></div>
+          <p className="formal-context-request">{question.request || question.title}</p>
+          {contextChecksOpen && <ul className="formal-context-checks" id="formal-context-checks" aria-label="当前题目验收要点" tabIndex={0}>{question.acceptance.map((item, index) => <li key={`${index}-${item}`}><CheckCircle2 size={13} /><span>{item}</span></li>)}</ul>}
+        </div>}
+        <div className="formal-evidence-scroll" ref={evidenceRef} role="region" aria-label="题目与图片" tabIndex={0}>
+        <details className="panel formal-brief" open={briefExpanded} hidden={!briefExpanded}>
           <summary className="formal-brief-toggle" onClick={event => { event.preventDefault(); setBriefExpanded(previous => !previous); }}><span><strong>题目与参考图</strong><small>{question.id} · {question.title}</small></span><ChevronRight size={16} /></summary>
           <div className="formal-brief-content">
           <div className="formal-brief-top"><span>QUESTION {String(position + 1).padStart(2, '0')} <small>/ {project.questions.length}</small></span><span className="pill">{question.id}</span></div>
@@ -489,6 +504,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           })}
         </div>}
         <div className="formal-navigation"><button className="btn btn-small" disabled={position === 0 || loading || busy} onClick={() => navigate(project.questions[position - 1].id)}><ChevronLeft size={14} />上一题</button><span>{position + 1} / {project.questions.length}</span><button className="btn btn-small" disabled={position === project.questions.length - 1 || loading || busy} onClick={() => navigate(project.questions[position + 1].id)}>下一题<ChevronRight size={14} /></button></div>
+        </div>
       </section>
 
       <aside className="panel formal-rating">
