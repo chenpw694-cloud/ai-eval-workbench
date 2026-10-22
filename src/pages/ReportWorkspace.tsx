@@ -50,8 +50,8 @@ export default function ReportWorkspace({ bundle, onSave, onToast, demo = false,
     try {
       if (format === 'json') downloadJson(`${name}.json`, report);
       else {
-        const file = format === 'word' ? await (await import('../core/wordReport')).reportWord(bundle, basis, loader, report.generatedAt)
-          : format === 'xlsx' ? await (await import('../core/readableWorkbook')).readableWorkbook(bundle, basis, report.generatedAt)
+        const file = format === 'word' ? await (await import('../core/wordReport')).reportWord(bundle, basis, loader, report.generatedAt, demo)
+          : format === 'xlsx' ? await (await import('../core/readableWorkbook')).readableWorkbook(bundle, basis, report.generatedAt, demo)
           : new Blob([reportMarkdown(report)], {type:'text/markdown;charset=utf-8'});
         const url = URL.createObjectURL(file), a = document.createElement('a'); a.href = url;
         a.download = `${name}.${format === 'word' ? 'docx' : format}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);

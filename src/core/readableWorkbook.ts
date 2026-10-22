@@ -48,14 +48,14 @@ export async function questionsWorkbook(questions: Question[]): Promise<Blob> {
   sheet(wb, '题库', table.headers, table.rows, [16, 24, 16, 14, 12, 60, 48, 28]);
   return bytes(wb);
 }
-export async function readableWorkbook(bundle: ProjectBundle, basis: ReportBasis = 'original', generatedAt = new Date().toISOString()): Promise<Blob> {
-  const wb = await workbook(), report = buildReport(bundle, basis, generatedAt), p = bundle.project;
+export async function readableWorkbook(bundle: ProjectBundle, basis: ReportBasis = 'original', generatedAt = new Date().toISOString(), demo = false): Promise<Blob> {
+  const wb = await workbook(), report = buildReport(bundle, basis, generatedAt, demo), p = bundle.project;
   const product = (id: string) => p.products.find(row => row.id === id)?.name ?? id;
   const member = (id: string) => p.members.find(row => row.id === id)?.name ?? id;
   const summary = sheet(wb, '结果汇总', ['产品', '版本或档位', '负责人', '性质', '已提交', '应评', '总分 / 5', '可用率', '平均耗时 秒', '可用图成本', '状态'], report.results.map(row => {
     const item = p.products.find(item => item.id === row.productId)!;
-    return [item.name, item.version, member(item.ownerId), item.demo ? '模拟' : '真实', row.submitted, row.expected, row.total, row.usableRate, row.meanSeconds, row.costPerUsable, row.total === null ? '数据未齐' : ({eligible:'可参与推荐', vetoed:'一票否决',pending:'待检查',simulated:'模拟'})[row.eligibility]];
-  }), [24, 24, 18, 12, 12, 12, 14, 14, 18, 18, 20], `${p.name}；${generatedAt}；${basis === 'original' ? '原始初评' : '裁决口径参考分'}。本表是评分结果快照，总分采用 1–5 分；修改 Excel 不会自动回写工作台。完整数据交接请导入整个 ZIP。`);
+    return [item.name, item.version, member(item.ownerId), demo || item.demo ? '模拟' : '真实', row.submitted, row.expected, row.total, row.usableRate, row.meanSeconds, row.costPerUsable, row.total === null ? '数据未齐' : ({eligible:'可参与推荐', vetoed:'一票否决',pending:'待检查',simulated:'模拟'})[row.eligibility]];
+  }), [24, 24, 18, 12, 12, 12, 14, 14, 18, 18, 20], `${demo ? '界面演示；' : ''}${p.name}；${generatedAt}；${basis === 'original' ? '原始初评' : '裁决口径参考分'}。本表是评分结果快照，总分采用 1–5 分；修改 Excel 不会自动回写工作台。完整数据交接请导入整个 ZIP。`);
   summary.getColumn(7).numFmt = '0.00'; summary.getColumn(8).numFmt = '0.0%'; summary.getColumn(9).numFmt = '0.0'; summary.getColumn(10).numFmt = '0.000';
   const dims = sheet(wb, '维度得分', ['产品', '维度', '权重', '得分', '已计入样本', '应计入样本', '是否完整'], report.results.flatMap(row => p.scheme.dimensions.map(dim => { const score = row.dimensions[dim.id as keyof typeof row.dimensions]; return [product(row.productId), `${dim.id} ${dim.name}`, dim.weight / 100, score?.value ?? null, score?.n ?? 0, score?.expected ?? 0, score?.complete ? '是' : '否']; })), [24, 34, 12, 12, 18, 18, 14]);
   dims.getColumn(3).numFmt = '0.0%'; dims.getColumn(4).numFmt = '0.00';

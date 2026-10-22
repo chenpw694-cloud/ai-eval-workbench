@@ -73,3 +73,10 @@ test('one archive ZIP preserves the frozen report and original files for archive
  assert.deepEqual(read.record.manifest,record.manifest);assert.equal(read.report.status,'checkpoint');
  for(const file of read.record.files)assert.equal(sha(Buffer.from(await file.blob.arrayBuffer())),sha(Buffer.from(await record.files.find(f=>f.name===file.name).blob.arrayBuffer())));
 });
+test('demonstration downloads stay marked as simulated even when the example product flags are real',async()=>{
+ const b=fixture(2,2),stamp='2026-10-22T12:00:00Z';
+ const wb=new Excel.Workbook();await wb.xlsx.load(await (await readableWorkbook(b,'original',stamp,true)).arrayBuffer());
+ assert.equal(wb.getWorksheet('结果汇总').getCell('D5').value,'模拟');assert(wb.getWorksheet('结果汇总').getCell('A2').value.includes('界面演示'));
+ const word=unzipSync(new Uint8Array(await (await reportWord(b,'original',async()=>undefined,stamp,true)).arrayBuffer()));
+ assert(strFromU8(word['word/document.xml']).includes('界面演示 · '));assert(strFromU8(word['word/document.xml']).includes('（模拟）'));
+});

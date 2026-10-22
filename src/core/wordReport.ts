@@ -52,20 +52,20 @@ async function imageRun(asset: Asset): Promise<ImageRun> {
   const ratio = Math.min(280 / width, 195 / height);
   return new ImageRun({ type, data: bytes, transformation: { width: Math.round(width * ratio), height: Math.round(height * ratio) }, altText: { title: asset.name, description: '固定的评测最佳图', name: asset.name } });
 }
-export async function reportWord(bundle: ProjectBundle, basis: ReportBasis, loader: (id: string) => Promise<Asset | undefined>, generatedAt = new Date().toISOString()): Promise<Blob> {
-  const report = buildReport(bundle, basis, generatedAt), notes = report.notes, project = bundle.project;
+export async function reportWord(bundle: ProjectBundle, basis: ReportBasis, loader: (id: string) => Promise<Asset | undefined>, generatedAt = new Date().toISOString(), demo = false): Promise<Blob> {
+  const report = buildReport(bundle, basis, generatedAt, demo), notes = report.notes, project = bundle.project;
   const product = (id: string) => project.products.find(row => row.id === id)?.name ?? id;
   const children: (Paragraph | Table)[] = [
-    p(`${project.name}评测报告`, { heading: HeadingLevel.TITLE }),
+    p(`${demo ? '界面演示 · ' : ''}${project.name}评测报告`, { heading: HeadingLevel.TITLE }),
     p(`报告草稿   ${new Date(generatedAt).toLocaleDateString('zh-CN')}   ${basis === 'original' ? '原始初评' : '裁决口径参考分'}`),
     p(notes?.summary || `当前记录了 ${report.results.reduce((n, row) => n + row.submitted, 0)} 份有效初评和 ${report.quality.gsb.reduce((n, row) => n + row.n, 0)} 次有效 GSB。人工结论尚未填写，以下保留已完成数据与当前缺口。`),
     heading('评测概况'), p(project.background || '评测背景尚未填写'), p(`评测周期：${project.period || '待填写'}。共 ${project.questions.length} 道题，${project.products.length} 个产品，${project.members.length} 位成员。各竞品分别与共同的自家结果比较。`),
     p(`评分采用 1 至 5 分。维度权重：${project.scheme.dimensions.map(row => `${row.id} ${row.name} ${row.weight}%`).join('；')}。未完成项保持为空，模拟数据单独标明。`),
-    heading('产品表现'), table(['产品', '总分 / 5', '可用率', '平均耗时 秒', '可用图成本'], report.results.map(row => [product(row.productId) + (project.products.find(item => item.id === row.productId)?.demo ? '（模拟）' : ''), num(row.total), pct(row.usableRate), num(row.meanSeconds, 1), num(row.costPerUsable, 3)]), [2640, 1440, 1440, 1920, 1920]),
+    heading('产品表现'), table(['产品', '总分 / 5', '可用率', '平均耗时 秒', '可用图成本'], report.results.map(row => [product(row.productId) + (demo || project.products.find(item => item.id === row.productId)?.demo ? '（模拟）' : ''), num(row.total), pct(row.usableRate), num(row.meanSeconds, 1), num(row.costPerUsable, 3)]), [2640, 1440, 1440, 1920, 1920]),
     p('总分仅在所需维度齐全时计算。单个维度的已有分数可以作为参考，不代表完整总分。'),
     table(['产品', ...project.scheme.dimensions.map(row => row.id)], report.results.map(row => [product(row.productId), ...project.scheme.dimensions.map(dim => { const value = row.dimensions[dim.id as keyof typeof row.dimensions]; return `${num(value?.value ?? null)}${value?.complete ? '' : ' 待齐'}`; })]), [2640, ...project.scheme.dimensions.map(() => 960)]),
     heading('自家对比结果'), p('以自家产品为基准，G 为自家更好，S 为两者相当，B 为竞品更好。净胜率为胜数减负数后除以有效比较数，平局计入分母。'),
-    table(['对比竞品', '有效与应评', '自家胜 平 负', '净胜率', '数据性质'], report.quality.gsb.map(row => [product(row.productId), `${row.n} / ${row.expected}`, `${row.wins} / ${row.ties} / ${row.losses}`, pct(row.net), row.demo ? '含模拟数据' : '真实对象']), [2640, 1560, 2040, 1440, 1680]),
+    table(['对比竞品', '有效与应评', '自家胜 平 负', '净胜率', '数据性质'], report.quality.gsb.map(row => [product(row.productId), `${row.n} / ${row.expected}`, `${row.wins} / ${row.ties} / ${row.losses}`, pct(row.net), demo || row.demo ? '含模拟数据' : '真实对象']), [2640, 1560, 2040, 1440, 1680]),
     p(notes?.consistencyExplanation || '尚未填写 GSB 与维度分的关系说明。'),
     heading('优势与改进建议'), p(notes?.productInsights || '各产品的优势与短板尚待人工分析。'), p(notes?.recommendations || '对自家产品的改进建议尚待填写。'),
     heading('功能与授权'), p(notes?.featureComparison || '功能与授权依据尚待补齐。'),
