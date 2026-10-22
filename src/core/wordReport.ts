@@ -61,7 +61,7 @@ export async function reportWord(bundle: ProjectBundle, basis: ReportBasis, load
     p(notes?.summary || `当前记录了 ${report.results.reduce((n, row) => n + row.submitted, 0)} 份有效初评和 ${report.quality.gsb.reduce((n, row) => n + row.n, 0)} 次有效 GSB。人工结论尚未填写，以下保留已完成数据与当前缺口。`),
     heading('评测概况'), p(project.background || '评测背景尚未填写'), p(`评测周期：${project.period || '待填写'}。共 ${project.questions.length} 道题，${project.products.length} 个产品，${project.members.length} 位成员。各竞品分别与共同的自家结果比较。`),
     p(`评分采用 1 至 5 分。维度权重：${project.scheme.dimensions.map(row => `${row.id} ${row.name} ${row.weight}%`).join('；')}。未完成项保持为空，模拟数据单独标明。`),
-    heading('产品表现'), table(['产品', '总分', '可用率', '平均耗时 秒', '可用图成本'], report.results.map(row => [product(row.productId) + (project.products.find(item => item.id === row.productId)?.demo ? '（模拟）' : ''), num(row.total), pct(row.usableRate), num(row.meanSeconds, 1), num(row.costPerUsable, 3)]), [2640, 1440, 1440, 1920, 1920]),
+    heading('产品表现'), table(['产品', '总分 / 5', '可用率', '平均耗时 秒', '可用图成本'], report.results.map(row => [product(row.productId) + (project.products.find(item => item.id === row.productId)?.demo ? '（模拟）' : ''), num(row.total), pct(row.usableRate), num(row.meanSeconds, 1), num(row.costPerUsable, 3)]), [2640, 1440, 1440, 1920, 1920]),
     p('总分仅在所需维度齐全时计算。单个维度的已有分数可以作为参考，不代表完整总分。'),
     table(['产品', ...project.scheme.dimensions.map(row => row.id)], report.results.map(row => [product(row.productId), ...project.scheme.dimensions.map(dim => { const value = row.dimensions[dim.id as keyof typeof row.dimensions]; return `${num(value?.value ?? null)}${value?.complete ? '' : ' 待齐'}`; })]), [2640, ...project.scheme.dimensions.map(() => 960)]),
     heading('自家对比结果'), p('以自家产品为基准，G 为自家更好，S 为两者相当，B 为竞品更好。净胜率为胜数减负数后除以有效比较数，平局计入分母。'),
@@ -94,7 +94,7 @@ export async function reportWord(bundle: ProjectBundle, basis: ReportBasis, load
     if (cells.length) { const rows: TableRow[] = []; for (let i = 0; i < cells.length; i += 2) rows.push(new TableRow({ cantSplit: true, children: [cells[i], cells[i + 1] ?? new TableCell({ children: [p('')] })] })); children.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [4680, 4680], rows })); }
   }
   children.push(heading('质量与数据缺口', true), p(`${report.checks.filter(row => row.passed).length} / ${report.checks.length} 项检查通过。本 Word 为可编辑报告草稿，不代替完整项目备份。`));
-  for (const check of report.checks.filter(row => !row.passed)) children.push(p(`${check.title}：${check.detail}`));
+  for (const check of report.checks.filter(row => !row.passed)) children.push(p(`${check.title}：${check.id === 'media' ? '本报告仅嵌入所选典型案例图。完整原图、评分与修改历史请另保存团队交接 ZIP；固定版本请在版本归档中留存。' : check.detail}`));
   children.push(heading('局限与备注'), p(notes?.limitations || '尚待补充样本、版本、人员与随机性的影响。'), p(notes?.noteResolution || '当前没有已保存的备注处理说明。'), p(`参与人：${notes?.participants.map(id => project.members.find(member => member.id === id)?.name ?? id).join('、') || '尚未确认'}`));
   return blob(document(children));
 }

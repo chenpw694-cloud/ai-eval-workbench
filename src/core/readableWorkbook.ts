@@ -52,7 +52,7 @@ export async function readableWorkbook(bundle: ProjectBundle, basis: ReportBasis
   const wb = await workbook(), report = buildReport(bundle, basis, generatedAt), p = bundle.project;
   const product = (id: string) => p.products.find(row => row.id === id)?.name ?? id;
   const member = (id: string) => p.members.find(row => row.id === id)?.name ?? id;
-  const summary = sheet(wb, '结果汇总', ['产品', '版本或档位', '负责人', '性质', '已提交', '应评', '总分', '可用率', '平均耗时 秒', '可用图成本', '状态'], report.results.map(row => {
+  const summary = sheet(wb, '结果汇总', ['产品', '版本或档位', '负责人', '性质', '已提交', '应评', '总分 / 5', '可用率', '平均耗时 秒', '可用图成本', '状态'], report.results.map(row => {
     const item = p.products.find(item => item.id === row.productId)!;
     return [item.name, item.version, member(item.ownerId), item.demo ? '模拟' : '真实', row.submitted, row.expected, row.total, row.usableRate, row.meanSeconds, row.costPerUsable, row.total === null ? '数据未齐' : ({eligible:'可参与推荐', vetoed:'一票否决',pending:'待检查',simulated:'模拟'})[row.eligibility]];
   }), [24, 24, 18, 12, 12, 12, 14, 14, 18, 18, 20], `${p.name}；${generatedAt}；${basis === 'original' ? '原始初评' : '裁决口径参考分'}。本表是评分结果快照，总分采用 1–5 分；修改 Excel 不会自动回写工作台。完整数据交接请导入整个 ZIP。`);
