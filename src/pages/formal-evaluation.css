@@ -242,11 +242,11 @@
 .formal-empty h1 { font-size: 19px; font-weight: 550; color: #9277a7; margin: 20px 0 10px; }
 .formal-empty p { font-size: 12px; line-height: 1.9; color: #b39dc4; margin: 5px 0; }
 .formal-image-dialog { max-width: min(1080px, 92vw); width: 82vw; padding: 15px; border: 1px solid #e8e3f0; border-radius: 12px; background: #fff; color: #8d7f9c; max-height: 94vh; }
+.formal-image-dialog[open] { display: flex; flex-direction: column; height: min(860px, 92dvh); max-height: 92dvh; overflow: hidden; }
 .formal-image-dialog::backdrop { background: #28213fad; backdrop-filter: blur(4px); }
-.formal-dialog-top { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 12px; font-size: 12px; }
+.formal-dialog-top { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 12px; font-size: 12px; }
 .formal-dialog-top > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.formal-image-dialog > img { display: block; max-width: 100%; max-height: 75vh; object-fit: contain; margin: auto; }
-.formal-image-dialog > p { font-size: 10px; color: #b3a4c1; text-align: center; margin-bottom: 2px; }
+.formal-dialog-top > button { flex-shrink: 0; }
 
 @media (min-width: 1650px) {
   .formal-layout { grid-template-columns: 192px minmax(400px, 1fr) 354px; gap: 19px; }

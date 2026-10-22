@@ -1,4 +1,5 @@
 import AnchorRatings from '../components/AnchorRatings';
+import ImageInspector from '../components/ImageInspector';
 import { isAnchorMode, questionDimensions } from '../core/ratings';
 import { resolveReferences } from '../core/references';
 import type { DimensionRatings } from '../core/model';
@@ -557,6 +558,6 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         </footer>
       </aside>
     </div>
-    <dialog ref={dialogRef} className="formal-image-dialog" onClick={event => { if (event.target === event.currentTarget) dialogRef.current?.close(); }}><div className="formal-dialog-top"><span>{dialogAsset?.name}</span><button className="btn btn-small" onClick={() => dialogRef.current?.close()} aria-label="关闭原图"><X size={18} /></button></div>{dialogAsset && <img src={assetUrl(dialogAsset)} alt={dialogAsset.name} />}<p>原始图片 · {dialogAsset && humanSize(dialogAsset.size)} · 按原比例展示，可通过浏览器缩放查看细节。</p></dialog>
+    <dialog ref={dialogRef} className="formal-image-dialog" onClose={() => setDialogAsset(null)} onClick={event => { if (event.target === event.currentTarget) dialogRef.current?.close(); }}><div className="formal-dialog-top"><span>{dialogAsset?.name}</span><button className="btn btn-small" onClick={() => dialogRef.current?.close()} aria-label="关闭原图"><X size={18} /></button></div>{dialogAsset && <ImageInspector key={dialogAsset.id} src={assetUrl(dialogAsset)} alt={dialogAsset.name} info={`原始图片 · ${humanSize(dialogAsset.size)}`} />}</dialog>
   </div>;
 }
