@@ -22,6 +22,20 @@ export function allowedSeverities(tag: TagDefinition): Severity[] {
   return index < 0 ? [] : severities.filter((_, candidate) => Math.abs(candidate - index) <= 1);
 }
 
+/** Explain conflicting human selections without changing ratings or usability. */
+export function bestImageUsabilityIssues(project: Project, record: Pick<Evaluation, 'bestMediaId' | 'mediaChecks' | 'tags' | 'ratings'>): string[] {
+  if (!record.bestMediaId || record.mediaChecks.find(check => check.mediaId === record.bestMediaId)?.usable !== true) return [];
+  const errors: string[] = [];
+  const seriousTags = record.tags.filter(assignment => {
+    const definition = project.scheme.tags.find(tag => tag.code === assignment.code);
+    return definition && imageDimensions.includes(definition.dimension as DimensionId) && ['P0', 'P1'].includes(assignment.severity);
+  });
+  if (seriousTags.length) errors.push(`最佳图存在 P0/P1 问题（${seriousTags.map(tag => `${tag.code} ${tag.severity}`).join('、')}），不可标记为可用。请核对标签等级，或在“逐图检查”选择“不可用”。`);
+  const lowScores = isAnchorMode(project.scheme) ? imageRatingDimensions.filter(id => (record.ratings?.[id]?.score ?? 5) <= 2) : [];
+  if (lowScores.length) errors.push(`最佳图的${lowScores.map(id => `${id} 维度为 ${record.ratings![id].score} 分`).join('、')}，按当前评分不可标记为可用。请核对维度评分，或在“逐图检查”选择“不可用”。`);
+  return errors;
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value !== null && typeof value === 'object') {
@@ -133,11 +147,7 @@ export function validateEvaluation(project: Project, record: Evaluation, assets:
     if (!record.bestMediaId || !record.mediaIds.includes(record.bestMediaId)) errors.push('请选择最佳图：在生成结果下点击“设为最佳图”');
     else {
       const check = record.mediaChecks.find(item => item.mediaId === record.bestMediaId);
-      const seriousImageTag = record.tags.some(assignment => {
-        const definition = project.scheme.tags.find(tag => tag.code === assignment.code);
-        return definition && imageDimensions.includes(definition.dimension as DimensionId) && ['P0', 'P1'].includes(assignment.severity);
-      });
-      if ((seriousImageTag || (isAnchorMode(project.scheme) && imageRatingDimensions.some(id => (record.ratings?.[id]?.score ?? 5) <= 2))) && check?.usable === true) errors.push('最佳图存在 P0/P1 问题，不可标记为可用');
+      errors.push(...bestImageUsabilityIssues(project, record));
       const hasInfringementTag = record.tags.some(tag => tag.code === 'F-01');
       if (check && typeof check.infringement === 'boolean' && hasInfringementTag !== check.infringement) errors.push('最佳图 F-01 标签与逐图侵权检查不一致');
     }

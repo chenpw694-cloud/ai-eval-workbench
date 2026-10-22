@@ -236,6 +236,23 @@
 .formal-score-note { display: flex; gap: 6px; align-items: flex-start; color: #b5a8c3; font-size: 9px; line-height: 1.8; padding: 13px 0 15px; margin-top: 3px; border-bottom: 1px solid #f0edf5; }
 .formal-score-note svg { flex-shrink: 0; margin-top: 2px; }
 .formal-warning-text { font-size: 9px; color: #bf9493; line-height: 1.8; padding: 8px; background: #fff8f4; border-radius: 4px; }
+.formal-rule-help { margin: 12px 0; color: #9c91ac; font-size: 10px; line-height: 1.8; }
+.formal-rule-help summary { cursor: pointer; }
+.formal-rule-help p { margin: 8px 0 0; color: #a699b2; }
+.formal-consistency-note { border: 1px solid #eadcc1; border-radius: 7px; padding: 11px; margin: 12px 0; background: #fffcf5; color: #9f8653; font-size: 10px; line-height: 1.8; }
+.formal-consistency-note strong { font-weight: 600; }
+.formal-consistency-note p { margin: 7px 0; }
+.formal-consistency-note > div { display: flex; flex-wrap: wrap; gap: 8px; margin: 9px 0; }
+.formal-consistency-note button, .formal-submit-errors button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e2d7ee; border-radius: 5px; background: #fff; padding: 5px 7px; color: #8a70b1; font-size: 10px; cursor: pointer; }
+.formal-consistency-note button:hover, .formal-submit-errors button:hover { background: #f5efff; border-color: #c9b7df; }
+.formal-consistency-note small { display: block; color: #b1a182; font-size: 9px; }
+.formal-submit-errors { scroll-margin: 10px; }
+.formal-submit-errors > div { min-width: 0; }
+.formal-submit-errors ul { margin: 9px 0 0; padding-left: 15px; }
+.formal-submit-errors li { margin-bottom: 12px; overflow-wrap: anywhere; }
+.formal-submit-errors li > span { display: block; }
+.formal-submit-errors li > button { margin-top: 6px; }
+.formal-submit-errors:focus-visible { outline: 2px solid #cdb6dd; outline-offset: 2px; }
 .formal-metrics-title { display: flex; align-items: center; gap: 6px; color: #a99ab9; margin: 17px 0 12px; }
 .formal-metrics-title h3 { font-size: 11px; color: #9a87aa; }
 .formal-metrics { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 8px; }

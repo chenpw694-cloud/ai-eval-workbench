@@ -8,7 +8,7 @@ import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight
 import type { Asset, AssetMetadata, Evaluation, MediaCheck, ProjectBundle, TagAssignment } from '../core/model';
 import type { Severity } from '../core/scoring';
 import { dimensionScore } from '../core/scoring';
-import { allowedSeverities, latestEvaluations, validateEvaluation, validateProject } from '../core/assessment';
+import { allowedSeverities, bestImageUsabilityIssues, latestEvaluations, validateEvaluation, validateProject } from '../core/assessment';
 import { createAsset, getAsset } from '../storage/projects';
 import './formal-evaluation.css';
 
@@ -86,6 +86,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const dialogRef = useRef<HTMLDialogElement>(null);
   const evidenceRef = useRef<HTMLDivElement>(null);
   const ratingScrollRef = useRef<HTMLDivElement>(null);
+  const errorPanelRef = useRef<HTMLDivElement>(null);
   const urls = useRef(new Map<string, string>());
   const dirtyRef = useRef(false);
   const pendingRef = useRef(false);
@@ -104,6 +105,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     const check = mediaChecks.find(item => item.mediaId === image.id);
     return check?.usable == null || check?.infringement == null;
   }).length;
+  const currentBestId = outputs.length === 1 ? outputs[0].id : bestMediaId;
+  const usabilityIssues = bestImageUsabilityIssues(project, { bestMediaId: currentBestId, mediaChecks, tags: selectedTags, ratings });
   const missingReferences = question?.referenceNames.filter(name => !references.some(asset => asset.name === name)) ?? [];
   const reviewDimensions = project.scheme.dimensions.filter(dimension => ['A', 'B', 'C', 'F', 'G'].includes(dimension.id));
   const blockedReasons = [
@@ -144,6 +147,34 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   useEffect(() => {
     if (focusMode && focusQuestionsOpen) document.querySelector('.formal-question.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [focusMode, focusQuestionsOpen]);
+
+  useEffect(() => {
+    if (errors.length) {
+      errorPanelRef.current?.scrollIntoView({ block: 'nearest' });
+      errorPanelRef.current?.focus({ preventScroll: true });
+    }
+  }, [errors]);
+
+  function correctionTarget(message: string) {
+    if (/侵权|可用|P0\/P1|逐图/.test(message)) return { key: 'media-checks', label: '逐图检查' };
+    if (/维度|锚点|评分依据/.test(message)) return { key: 'anchors', label: '维度评分' };
+    if (/标签/.test(message)) return { key: 'tags', label: '问题标签' };
+    if (/耗时/.test(message)) return { key: 'seconds', label: '生成耗时' };
+    if (/参考图/.test(message)) return { key: 'references', label: '参考图' };
+    if (/最佳图|原始输出|原图|图片引用/.test(message)) return { key: 'outputs', label: '生成结果' };
+    if (/失败/.test(message)) return { key: 'failure', label: '失败原因' };
+    if (/评测员/.test(message)) return { key: 'reviewer', label: '评测员' };
+    return null;
+  }
+  function locateCorrection(key: string) {
+    if (key === 'references') setBriefExpanded(true);
+    requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(`[data-review-target="${key}"]`);
+      element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const control = element?.matches('input, select, textarea, button') ? element : element?.querySelector<HTMLElement>('input, select, textarea') ?? element?.querySelector<HTMLElement>('button') ?? element;
+      control?.focus({ preventScroll: true });
+    });
+  }
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -380,7 +411,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
             : error;
           return outputs.reduce((text, asset, index) => text.replaceAll(asset.id, `第 ${index + 1} 张原图（${asset.name}）`), message);
         }));
-        onToast('尚未提交，请根据提示补全评测记录。');
+        onToast(`尚有 ${validationErrors.length} 项需要处理，当前评分与选项已保留。`);
         return;
       }
     }
@@ -495,7 +526,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           <h3>验收要点</h3><ul className="formal-acceptance">{question.acceptance.map((item, index) => <li key={`${index}-${item}`}><CheckCircle2 size={14} /><span>{item}</span></li>)}</ul>
           {!question.acceptance.length && <p className="formal-help">尚未填写验收要点。</p>}
           {Object.keys(question.fields).length > 0 && <details className="formal-extra"><summary>更多题目字段</summary>{Object.entries(question.fields).map(([key, value]) => <p key={key}><strong>{key}</strong>：{value}</p>)}</details>}
-          <div className="formal-reference-heading"><h3>参考图 <small>{question.referenceNames.length ? `${question.referenceNames.length} 张要求` : '未指定'}</small></h3><button className="btn btn-small" disabled={locked} onClick={() => chooseReference(null)}><Upload size={13} />添加参考图</button></div>
+          <div className="formal-reference-heading" data-review-target="references"><h3>参考图 <small>{question.referenceNames.length ? `${question.referenceNames.length} 张要求` : '未指定'}</small></h3><button className="btn btn-small" disabled={locked} onClick={() => chooseReference(null)}><Upload size={13} />添加参考图</button></div>
           <p className="formal-help">本题各产品共用参考图。鼠标移到图片上，点击右上角 × 可移除；修改后请保存。已保存的原图仍可恢复。</p>
           <input ref={referenceInput} type="file" accept={IMAGE_ACCEPT} multiple={!referenceTarget.current} hidden onChange={event => void upload(event.target.files, 'reference')} />
           <div className="formal-references">{question.referenceNames.map(name => {
@@ -507,7 +538,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           </div>
         </details>
 
-        <div className="panel formal-results">
+        <div className="panel formal-results" data-review-target="outputs">
           <div className="formal-image-heading"><h3><ImageIcon size={16} />生成结果 <small>{outputs.length} 张原图</small></h3><div className="formal-image-actions">{onBulkImport && <button className="btn btn-small formal-bulk-entry" disabled={locked} onClick={onBulkImport} title="批量导入参考图或生成图；离开前请先保存当前草稿"><FolderOpen size={14}/>批量导图</button>}<button className="btn btn-small" disabled={locked} onClick={() => outputInput.current?.click()}><Upload size={14} />上传全部原图</button></div><input ref={outputInput} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => void upload(event.target.files, 'output')} /></div>
           <button className={`formal-main-image ${activeImage ? '' : 'empty'}`} onClick={() => activeImage && showImage(activeImage)} disabled={!activeImage} aria-label="放大查看原图">
             {activeImage ? <><img src={assetUrl(activeImage)} alt={activeImage.name} /><span className="formal-source">原始文件 · 未压缩</span><span className="formal-zoom"><Maximize2 size={16} /></span></> : <span><ImageIcon size={36} />{loading ? '正在读取原图…' : '上传本次生成的全部图片'}<small>PNG、JPEG、WebP、GIF · 单张 ≤ 25 MB · 每批 ≤ 12 张</small></span>}
@@ -518,7 +549,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
           <div className="formal-file-note"><ShieldCheck size={13} /><span>保留原始图片与文件校验信息；图片仅在当前浏览器读取与保存。</span></div>
         </div>
 
-        {outputs.length > 0 && <div className="panel formal-image-checks"><div className="formal-check-heading"><h3>逐图检查</h3><span>可用 {usableCount} / {outputs.length} 张{uncheckedCount > 0 ? ` · ${uncheckedCount} 张待确认` : ' · 已全部确认'}</span></div><p className="formal-help">每张图片都需人工确认。最佳图若有 A / B / C / F 的 P0、P1 问题，不应标为可用。</p>
+        {outputs.length > 0 && <div className="panel formal-image-checks" data-review-target="media-checks"><div className="formal-check-heading"><h3>逐图检查</h3><span>可用 {usableCount} / {outputs.length} 张{uncheckedCount > 0 ? ` · ${uncheckedCount} 张待确认` : ' · 已全部确认'}</span></div><p className="formal-help">每张图片都需人工确认。最佳图若有 A / B / C / F 的 P0、P1 问题，不应标为可用。</p>
           {outputs.map((asset, index) => {
             const check = mediaChecks.find(item => item.mediaId === asset.id);
             return <div className="formal-image-check" key={asset.id}><button className="formal-check-thumb" onClick={() => setActiveMediaId(asset.id)}><img src={assetUrl(asset)} alt={`查看第 ${index + 1} 张图片`} /><span>{String(index + 1).padStart(2, '0')}</span></button><div className="formal-check-options"><label>可用性<select aria-label={`第 ${index + 1} 张图片可用性`} value={check?.usable == null ? '' : check.usable ? 'yes' : 'no'} disabled={locked} onChange={event => updateCheck(asset.id, 'usable', event.target.value === '' ? null : event.target.value === 'yes')}><option value="">待确认</option><option value="yes">可用</option><option value="no">不可用</option></select></label><label>侵权风险<select aria-label={`第 ${index + 1} 张图片侵权风险`} value={check?.infringement == null ? '' : check.infringement ? 'yes' : 'no'} disabled={locked} onChange={event => updateCheck(asset.id, 'infringement', event.target.value === '' ? null : event.target.value === 'yes')}><option value="">待确认</option><option value="no">未发现</option><option value="yes">存在风险</option></select></label></div>{bestMediaId === asset.id && <span className="formal-best-label">最佳图</span>}</div>;
@@ -532,10 +563,10 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         <div className="formal-rating-header"><h2>评测记录</h2><span className={`formal-save-state ${cleanSubmitted ? 'submitted' : ''}`}>{loading ? '读取中' : busy ? '处理中' : dirty ? '未保存' : cleanSubmitted ? '已提交' : savedRevision ? '已存草稿' : '待评测'}</span></div>
         <div className="formal-rating-scroll" ref={ratingScrollRef} role="region" aria-label="评分表单" tabIndex={0}><fieldset disabled={locked}>
           <label className="formal-field"><span>被测产品</span><select value={productId} onChange={event => navigate(questionId, event.target.value)}>{project.products.map((item, index) => <option key={item.id} value={item.id}>{item.name.trim() || `待配置产品 ${index + 1}`}{item.version ? ` · ${item.version}` : ''}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
-          <label className="formal-field"><span>当前评测员 <small>本地身份</small></span><select value={reviewerId} onChange={event => { setReviewerId(event.target.value); edited(); }}><option value="">请选择评测员</option>{project.members.map(member => <option key={member.id} value={member.id}>{member.name}{product.ownerId === member.id ? ' · 产品负责人' : ''}</option>)}</select></label>
+          <label className="formal-field" data-review-target="reviewer"><span>当前评测员 <small>本地身份</small></span><select value={reviewerId} onChange={event => { setReviewerId(event.target.value); edited(); }}><option value="">请选择评测员</option>{project.members.map(member => <option key={member.id} value={member.id}>{member.name}{product.ownerId === member.id ? ' · 产品负责人' : ''}</option>)}</select></label>
           <p className="formal-help">本地身份用于记录署名；同一产品、同一题目共同维护一条修订历史。</p>
-          {isAnchorMode(project.scheme) && <><AnchorRatings scheme={project.scheme} dimensions={failed && !outputs.length ? ['G'] : questionDimensions} values={ratings} disabled={locked} onChange={value => { setRatings(value); edited(); }}/><p className="anchor-readonly">D 在“走查与成本”按编辑任务打分；E 根据可用率、速度和成本计算。A/B/C/F 任一评分 ≤2 时，最佳图不可标为可用。</p></>}
-          <div className="formal-tag-title"><h3>{isAnchorMode(project.scheme) ? '问题标签 · 诊断用' : '最佳图问题标签'}</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">按实际问题选标签，无问题可不选；不用逐项填写。图像标签对应最佳图，流程故障记录在 G 维度。</p>
+          {isAnchorMode(project.scheme) && <><div data-review-target="anchors"><AnchorRatings scheme={project.scheme} dimensions={failed && !outputs.length ? ['G'] : questionDimensions} values={ratings} disabled={locked} onChange={value => { setRatings(value); edited(); }}/></div><p className="anchor-readonly">D 在“走查与成本”按编辑任务打分；E 根据可用率、速度和成本计算。A/B/C/F 任一评分 ≤2 时，最佳图不可标为可用。</p></>}
+          <div className="formal-tag-title" data-review-target="tags" tabIndex={-1}><h3>{isAnchorMode(project.scheme) ? '问题标签 · 诊断用' : '最佳图问题标签'}</h3><span>已选 {selectedTags.length} 项</span></div><p className="formal-help">按实际问题选标签，无问题可不选；不用逐项填写。图像标签对应最佳图，流程故障记录在 G 维度。</p>
           {reviewDimensions.map(dimension => {
             const definitions = project.scheme.tags.filter(tag => tag.dimension === dimension.id);
             const assignments = selectedTags.filter(tag => definitions.some(definition => definition.code === tag.code));
@@ -550,9 +581,10 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
             </div>;
           })}
           <div className="formal-score-note"><Info size={13} /><span>{isAnchorMode(project.scheme) ? '当前为锚点直评分；以下问题标签仅作诊断与风险检查，不换算分数。' : '草稿的空维度显示 —；正式提交后，无问题标签计 5 分。'}F、G 完整维度分还需结合逐图检查与走查记录。{failed && !outputs.length && <> 当前失败无输出：{project.scheme.policies.failedNoOutput === 'score-one' ? 'A / B / C / F 按已确认规则记 1 分。' : project.scheme.policies.failedNoOutput === 'exclude' ? 'A / B / C / F 按规则排除。' : '评分口径尚未确认。'}</>}</span></div>
-          {selectedTags.some(tag => ['A03', 'B01'].includes(normalizeCode(tag.code))) && <p className="formal-warning-text">若涉及价格等关键信息错误或商品品类错误，请按规则将相应标签调整为 P0，并在备注中记录具体证据。</p>}
+          {selectedTags.some(tag => ['A03', 'B01'].includes(normalizeCode(tag.code))) && <details className="formal-rule-help"><summary>标签等级说明（选读）</summary><p>这段说明无需勾选或填写。请按实际问题选择等级；涉及价格等关键信息错误或商品品类错误时，可参考方案中的 P0 标准，并按需在备注补充证据。</p></details>}
+          {usabilityIssues.length > 0 && <div className="formal-consistency-note" role="status"><strong>最佳图的可用性与当前选择不一致</strong>{usabilityIssues.map(message => <p key={message}>{message}</p>)}<div><button type="button" disabled={locked} onClick={() => locateCorrection('media-checks')}>查看逐图检查</button><button type="button" disabled={locked || !currentBestId} onClick={() => { if (currentBestId) updateCheck(currentBestId, 'usable', false); }}>将最佳图标为不可用</button></div><small>请按实际情况确认；分数和标签会保留。</small></div>}
           <div className="formal-metrics-title"><Clock3 size={15} /><h3>生成记录</h3></div>
-          <div className="formal-metrics"><label className="formal-field"><span>耗时 / 秒 <small>提交必填</small></span><input type="number" min="0" step="any" value={seconds} placeholder="实际耗时" onChange={event => { setSeconds(event.target.value); edited(); }} /></label><div><span>总张数</span><strong>{outputs.length}</strong></div><div><span>可用张数</span><strong>{outputs.length && mediaChecks.every(check => check.usable != null) ? usableCount : '—'}</strong></div></div>
+          <div className="formal-metrics"><label className="formal-field" data-review-target="seconds"><span>耗时 / 秒 <small>提交必填</small></span><input type="number" min="0" step="any" value={seconds} placeholder="实际耗时" onChange={event => { setSeconds(event.target.value); edited(); }} /></label><div><span>总张数</span><strong>{outputs.length}</strong></div><div><span>可用张数</span><strong>{outputs.length && mediaChecks.every(check => check.usable != null) ? usableCount : '—'}</strong></div></div>
           <label className="formal-failed"><input type="checkbox" checked={failed} onChange={event => {
             const checked = event.target.checked;
             setFailed(checked);
@@ -563,12 +595,12 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
             }
             edited();
           }} /><span>本次生成失败 / 中断</span></label>
-          {failed && <label className="formal-field formal-failure-reason"><span>失败原因 <small>提交必填</small></span><textarea rows={2} value={failureReason} placeholder="记录超时、报错或中断情况；G03 / G04 可按实际调整。" onChange={event => { setFailureReason(event.target.value); edited(); }} /></label>}
+          {failed && <label className="formal-field formal-failure-reason" data-review-target="failure"><span>失败原因 <small>提交必填</small></span><textarea rows={2} value={failureReason} placeholder="记录超时、报错或中断情况；G03 / G04 可按实际调整。" onChange={event => { setFailureReason(event.target.value); edited(); }} /></label>}
           <label className="formal-field formal-notes"><span><Flag size={13} />存疑与备注 <small>选填</small></span><textarea rows={3} value={notes} placeholder="记录判断依据，或需要复核的问题…" onChange={event => { setNotes(event.target.value); edited(); }} /></label>
           <div className="formal-record-context"><span>{savedRevision ? `第 ${savedRevision.revision} 版 · ${savedRevision.status === 'submitted' ? '提交' : '草稿'}于 ${new Date(savedRevision.createdAt).toLocaleString('zh-CN')}` : '尚无保存记录'}</span><span>规则 {project.scheme.version} · 原图 {visibleAssets.length} 张</span></div>
         </fieldset>
           {loadError && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div>{loadError}</div></div>}
-          {errors.length > 0 && <div className="formal-errors" role="alert"><AlertCircle size={15} /><div><strong>请检查以下内容</strong><ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul></div></div>}
+          {errors.length > 0 && <div className="formal-errors formal-submit-errors" ref={errorPanelRef} tabIndex={-1} role="alert"><AlertCircle size={15}/><div><strong>有 {errors.length} 项需要处理，已选评分会保留</strong><ul>{errors.map((error, index) => { const target = correctionTarget(error); return <li key={`${index}-${error}`}><span>{error}</span>{target && <button type="button" onClick={() => locateCorrection(target.key)}>查看{target.label}<ArrowRight size={12}/></button>}</li>; })}</ul></div></div>}
         </div>
         <footer className={`formal-rating-footer${position < project.questions.length - 1 ? ' has-next' : ''}`}>
           <button className="btn" aria-label="保存草稿" title="保存草稿" disabled={locked} onClick={() => void persist('draft')}><Save size={15} />保存草稿</button>

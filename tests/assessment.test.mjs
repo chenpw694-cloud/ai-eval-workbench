@@ -299,6 +299,21 @@ test('best-image P0/P1 and infringement cannot be usable; G process tags do not 
   assert.match(validateEvaluation(bundle.project, evaluation, bundle.assets).join('\n'), /F-01.*不一致/);
 });
 
+test('A-03 and B-01 do not require P0 or a note; a serious selected tag explains the actual usability conflict', () => {
+  const bundle = fixture(1, 1);
+  const evaluation = record(bundle);
+  evaluation.notes = '';
+  evaluation.tags = [{ code: 'A-03', severity: 'P2' }, { code: 'B-01', severity: 'P2' }];
+  assert.deepEqual(validateEvaluation(bundle.project, evaluation, bundle.assets), []);
+  evaluation.tags[0].severity = 'P1';
+  const errors = validateEvaluation(bundle.project, evaluation, bundle.assets);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /A-03 P1/);
+  assert.match(errors[0], /逐图检查.*不可用/);
+  evaluation.mediaChecks[0].usable = false;
+  assert.deepEqual(validateEvaluation(bundle.project, evaluation, bundle.assets), []);
+});
+
 test('required reference names must exactly match reference metadata for this question', () => {
   const bundle = fixture(1, 1);
   bundle.project.questions[0].referenceNames = ['Reference.png'];
