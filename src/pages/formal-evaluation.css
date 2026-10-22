@@ -54,6 +54,8 @@
 .formal-muted-empty { font-size: 11px; color: #a5a8b7; text-align: center; padding: 20px 0; }
 
 .formal-evidence { min-width: 0; display: flex; flex-direction: column; gap: 15px; }
+.formal-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+.formal-heading-actions > .btn { min-height: 32px; font-size: 10px; padding: 6px 10px; }
 .formal-evidence-scroll { min-width: 0; display: flex; flex-direction: column; gap: 15px; }
 .formal-question-context { flex-shrink: 0; padding: 10px 12px; border-color: #e5dff2; background: linear-gradient(115deg, #fcfbff, #fff); }
 .formal-context-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

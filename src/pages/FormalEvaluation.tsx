@@ -16,6 +16,7 @@ type Props = {
   bundle: ProjectBundle;
   onSave: (record: Evaluation, newAssets: Asset[], referenceChange?: { id: string; expectedHeadId: string | null; assetIds: string[] }) => Promise<void>;
   onToast: (message: string) => void;
+  onBulkImport?: () => void;
   initialQuestionId?: string;
 };
 
@@ -42,7 +43,7 @@ function checkImage(file: File): Promise<void> {
   });
 }
 
-export default function FormalEvaluation({ bundle, onSave, onToast, initialQuestionId }: Props) {
+export default function FormalEvaluation({ bundle, onSave, onToast, initialQuestionId, onBulkImport }: Props) {
   const { project } = bundle;
   const [questionId, setQuestionId] = useState(() => project.questions.find(q => q.id === initialQuestionId)?.id ?? project.questions[0]?.id ?? '');
   const [productId, setProductId] = useState(project.products[0]?.id ?? '');
@@ -434,7 +435,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   return <div className="formal-page">
     <header className="page-heading formal-heading">
       <div><div className="eyebrow">EVALUATION WORKSPACE</div><h1>逐题评测</h1><p>对照需求与原始输出，评分并保存每次评测记录。</p></div>
-      <div className="formal-local"><span />原图与记录仅保存在本机<span className="pill">{product.demo ? '模拟产品' : '正式项目'}</span></div>
+      <div className="formal-heading-actions">{onBulkImport && <button className="btn btn-small" disabled={loading || busy} onClick={onBulkImport}><Upload size={14}/>批量导图</button>}<div className="formal-local"><span />原图与记录仅保存在本机<span className="pill">{product.demo ? '模拟产品' : '正式项目'}</span></div></div>
     </header>
     <div className={`formal-notice ${blockedReasons.length ? 'warning' : ''}`}><Info size={16} /><div>{blockedReasons.length ? <><strong>可先记录草稿</strong> · {blockedReasons.join('；')}，补齐后才能正式提交。</> : <><strong>独立评测</strong> · 上传本次生成的全部原图，逐张检查后选出最佳图。保存后可继续编辑，每次修订均保留历史。</>}</div></div>
 

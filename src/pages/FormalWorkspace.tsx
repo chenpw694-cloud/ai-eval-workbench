@@ -11,6 +11,7 @@ import { downloadJson } from '../storage/local';
 import { PageHeading, PanelHeading, Pill } from '../ui';
 import ProjectSetup from './ProjectSetup';
 import FormalEvaluation from './FormalEvaluation';
+import BulkImages from './BulkImages';
 import StageSync from './StageSync';
 import QualityWorkspace, { IndependentPortal } from './QualityWorkspace';
 import { finalQualityBundle } from '../core/quality';
@@ -20,10 +21,11 @@ import ReportWorkspace from './ReportWorkspace';
 import ArchiveWorkspace from './ArchiveWorkspace';
 import './formal-workspace.css';
 
-type Section = 'overview' | 'setup' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'joint' | 'report' | 'archive' | 'independent' | 'trash';
+type Section = 'overview' | 'setup' | 'images' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'joint' | 'report' | 'archive' | 'independent' | 'trash';
 const sections = [
   { id: 'overview', label: '项目总览', icon: LayoutDashboard },
   { id: 'setup', label: '项目与题库', icon: Settings2 },
+  { id: 'images', label: '批量导图', icon: Image },
   { id: 'evaluation', label: '逐题评测', icon: ListTodo },
   { id: 'walkthrough', label: '走查与成本', icon: SlidersHorizontal },
   { id: 'results', label: '实际得分', icon: ChartNoAxesCombined },
@@ -275,7 +277,8 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
               catch (reason) { notify(reason instanceof Error ? reason.message : '无法开始评测'); }
             }}/> }
             {route.section === 'setup' && <ProjectSetup key={project.id} project={project} locked={locked} onSave={updateProject} onToast={notify} onRestart={() => openProjectAction('restart', project)} onTrash={() => openProjectAction('trash', project)}/>}
-            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onSave={async (record, assets, referenceChange) => {
+            {route.section === 'images' && <BulkImages key={project.id} bundle={bundle} onRefresh={refresh} onToast={notify} onEvaluate={() => go(project.id, 'evaluation')}/>}
+            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onBulkImport={() => go(project.id, 'images')} onSave={async (record, assets, referenceChange) => {
               await saveEvaluation(project.id, record, assets, referenceChange);
               await refresh();
             }}/>}
