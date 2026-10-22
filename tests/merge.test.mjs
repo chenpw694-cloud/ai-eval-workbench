@@ -270,7 +270,7 @@ test('project identity and hashes are checked beyond the project display name an
     bundle => { bundle.project.id = 'another-project'; },
     bundle => { bundle.project.schemeHash = 'another-hash'; },
     bundle => { bundle.project.questionsHash = 'another-hash'; },
-    bundle => { bundle.project.members[0].name = 'changed'; },
+    bundle => { bundle.project.members[0].id = 'changed'; },
     bundle => { bundle.project.products[0].version = 'v2'; },
     bundle => { bundle.project.products[0].ownerId = 'm2'; },
     bundle => { bundle.project.questions[0].request = 'changed'; },
@@ -283,6 +283,21 @@ test('project identity and hashes are checked beyond the project display name an
     change(incoming);
     assert.match(planMerge(local, stage(incoming)).blockers.join('\n'), /不兼容/);
   }
+});
+
+test('corrected member display names remain compatible with older stage packages and keep local names', () => {
+  const incoming = emptyBundle();
+  const submitted = evaluation(incoming);
+  const local = emptyBundle();
+  local.project.members[0].name = '更正后的负责人姓名';
+  const before = clone(local);
+  const plan = planMerge(local, submission(incoming, 'p1'));
+  assert.deepEqual(plan.blockers, []);
+  const merged = apply(plan);
+  assert.equal(merged.project.members[0].name, '更正后的负责人姓名');
+  assert.deepEqual(merged.project.members.map(member => member.id), incoming.project.members.map(member => member.id));
+  assert.deepEqual(merged.evaluations, [submitted]);
+  assert.deepEqual(local, before);
 });
 
 test('local project metadata, identity ordering and revision are preserved until storage increments it', () => {

@@ -52,7 +52,9 @@ test('repairing a label does not unlock product ownership, scope, membership or 
     next => { next.products[1].role = 'self'; },
     next => { next.products[1].demo = !next.products[1].demo; },
     next => { next.products.pop(); },
-    next => { next.members[0].name = '替换评测员'; },
+    next => { next.members[0].id = 'replacement-member'; },
+    next => { next.members.push({ id: 'new-member', name: '新增人员' }); },
+    next => { next.members.pop(); },
     next => { next.questions[0].request = '新题目'; },
     next => { next.scheme.version = '9.9.9'; },
     next => { next.rulesConfirmed = !next.rulesConfirmed; },
@@ -63,6 +65,23 @@ test('repairing a label does not unlock product ownership, scope, membership or 
     next.products[1].name = '允许补齐的名称';
     change(next);
     assert.equal(frozenConfigurationMatches(previous, next), false);
+  }
+});
+
+test('frozen projects allow nonempty member name corrections while IDs and assignments remain unchanged', () => {
+  for (const status of ['draft', 'active']) {
+    const previous = setup(status), next = structuredClone(previous);
+    const original = structuredClone(previous);
+    next.members[0].name = '更正后的姓名';
+    next.members[1].name = '同组评测员';
+    assert.equal(frozenConfigurationMatches(previous, next), true);
+    assert.deepEqual(next.members.map(member => member.id), previous.members.map(member => member.id));
+    assert.deepEqual(next.products, previous.products);
+    assert.deepEqual(previous, original);
+    for (const value of ['', '  ', undefined]) {
+      const invalid = structuredClone(next); invalid.members[0].name = value;
+      assert.equal(frozenConfigurationMatches(previous, invalid), false);
+    }
   }
 });
 

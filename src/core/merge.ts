@@ -50,7 +50,7 @@ const sortedById = <T extends { id: string }>(rows: T[]): T[] => [...rows].sort(
 function identity(project: Project): unknown {
   return {
     id: project.id, schemeHash: project.schemeHash, questionsHash: project.questionsHash,
-    members: sortedById(project.members),
+    members: sortedById(project.members).map(({ name: _name, ...member }) => member),
     products: sortedById(project.products).map(({ totalCost: _cost, commercialUse: _use, commercialEvidence: _evidence, ...product }) => product),
     questions: project.questions, expectedQuestionCount: project.expectedQuestionCount,
     rulesConfirmed: project.rulesConfirmed, scheme: project.scheme

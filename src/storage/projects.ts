@@ -122,7 +122,7 @@ export async function saveProject(input: Project): Promise<Project> {
         const records = evaluations.result as Evaluation[];
         if (existing && (existing.status === 'active' || records.some(record => record.status === 'submitted'))) {
           if (!frozenConfigurationMatches(existing, input)) {
-            failure = new Error('项目已开始或分发，题库、成员、产品身份和评分规则已冻结；未分发项目仅可补齐原空白产品名称和版本');
+            failure = new Error('项目已开始或分发，题库、成员 ID 与范围、产品身份和评分规则已冻结；成员姓名可更正，未分发项目还可补齐原空白产品名称和版本');
             transaction.abort(); return;
           }
         }

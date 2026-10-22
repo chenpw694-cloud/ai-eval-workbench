@@ -8,15 +8,17 @@ const canonical = (value: unknown): string => {
 };
 
 /**
- * Submitted work freezes its measurement scope. Before distribution, completing
+ * Submitted work freezes member IDs and its measurement scope. Display names
+ * may be corrected without reassigning work. Before distribution, completing
  * a previously blank product label is safe: IDs, ownership and scored rules do
  * not change. Once active (distributed or in quality review), labels freeze too
  * because team packages compare the complete product identity.
  */
 export function frozenConfigurationMatches(previous: Project, next: Project): boolean {
   if (previous.status === 'active' && next.status !== 'active') return false;
+  if (next.members.some(member => typeof member.name !== 'string' || !filled(member.name))) return false;
   const protectedFields = (project: Project, allowCompletion: boolean) => ({
-    members: project.members,
+    members: project.members.map(({ name: _name, ...member }) => member),
     products: project.products.map(({ totalCost, commercialUse, commercialEvidence, ...product }) => {
       if (!allowCompletion) return product;
       const original = previous.products.find(item => item.id === product.id);

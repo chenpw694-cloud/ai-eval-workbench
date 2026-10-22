@@ -113,6 +113,8 @@
 .setup-member-name > span { color: #a196ac; font-size: 10px; white-space: nowrap; }
 .setup-member-name input { width: 180px; min-height: 33px; padding: 7px 10px; font-size: 11px; }
 .setup-member-assignment { font-size: 10px; color: #aaa0b5; margin-left: auto; white-space: nowrap; }
+.setup-member-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 0 23px 23px; }
+.setup-member-save > span { font-size: 11px; color: #9c8bac; line-height: 1.8; }
 .setup-icon-button { padding: 5px; width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 5px; color: #b3a6bf; flex-shrink: 0; }
 .setup-icon-button:hover:not(:disabled) { background: #f4effa; color: #8c73ad; }
 .setup-products-section { margin-bottom: 19px; }

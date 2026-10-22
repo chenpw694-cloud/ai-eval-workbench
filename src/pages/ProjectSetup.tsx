@@ -375,12 +375,12 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
     <div className="setup-status-bar">
       <span><FileJson size={15} />{draft.scheme.name} <code>v{draft.scheme.version}</code></span>
       <Pill tone={locked ? 'orange' : dirty ? 'violet' : 'green'}>
-        {locked ? '已分发或开始评测 · 配置锁定' : dirty ? '有未保存修改' : '本地项目快照'}
+        {locked ? dirty ? '有未保存修改 · 评测口径锁定' : '评测口径锁定 · 姓名可更正' : dirty ? '有未保存修改' : '本地项目快照'}
       </Pill>
     </div>
 
     {locked && <Notice tone="warning">
-      <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景和周期；成员、产品、题目、权重及评分政策保持当前快照。{project.status === 'draft' && <> 尚未分发的项目，允许补填原本空白的产品名称或版本；已填写的身份信息保持锁定。</>}
+      <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景、周期和成员姓名；成员 ID 与增删、产品负责人、题目、权重及评分政策保持当前快照。{project.status === 'draft' && <> 尚未分发的项目，允许补填原本空白的产品名称或版本；已填写的产品身份保持锁定。</>}
       <div className="formal-locked-restart"><span>需要重新导入题库？保留旧项目，创建一份可编辑的新草稿。</span><button className="btn btn-small" disabled={saving} onClick={onRestart}><RotateCcw size={14}/>重新开始</button></div>
     </Notice>}
 
@@ -422,7 +422,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
       <section className="panel setup-section">
         <PanelHeading
           title="评测成员"
-          subtitle="成员 ID 保持稳定，产品负责人通过 ID 关联；分工是本地流程信息，不是登录权限。"
+          subtitle={locked ? '已开始评测，仍可更正姓名。成员 ID 与已有评分、产品分工保持关联；增删成员已锁定。' : '成员 ID 保持稳定，产品负责人通过 ID 关联；分工是本地流程信息，不是登录权限。'}
           action={<button className="btn btn-small" disabled={locked || saving} onClick={() => updateProject('members', [...draft.members, { id: `member_${crypto.randomUUID()}`, name: '' }])}><Plus size={14} />添加成员</button>}
         />
         <div className="setup-members">
@@ -432,7 +432,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
               <span className="setup-member-avatar">{index + 1}</span>
               <label className="setup-member-name">
                 <span>成员姓名</span>
-                <input aria-label={`成员 ${index + 1} 姓名`} value={member.name} placeholder="填写真实姓名" disabled={locked || saving} onChange={event => updateMember(member.id, { name: event.target.value })} />
+                <input aria-label={`成员 ${index + 1} 姓名`} value={member.name} placeholder="填写真实姓名" disabled={saving} onChange={event => updateMember(member.id, { name: event.target.value })} />
               </label>
               <span className="setup-member-assignment">负责 {assigned.length} 个产品</span>
               <button className="setup-icon-button" aria-label={`删除成员 ${member.name || index + 1}`} disabled={locked || saving || assigned.length > 0} title={assigned.length ? '请先重新分配其负责的产品，再删除成员' : '删除成员'} onClick={() => updateProject('members', draft.members.filter(item => item.id !== member.id))}><Trash2 size={15} /></button>
@@ -440,6 +440,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
           })}
           {!draft.members.length && <div className="setup-empty">还没有成员。添加成员后可以分配产品负责人。</div>}
         </div>
+        {locked && <div className="setup-member-save"><span>更正姓名后保存配置，无需重新开始评测。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '姓名与配置已保存，已有评分和成员关联保持不变')}><Save size={14}/>{saving ? '保存中…' : '保存配置'}</button></div>}
       </section>
 
       <section className="setup-products-section">
