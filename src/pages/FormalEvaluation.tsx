@@ -4,7 +4,7 @@ import { isAnchorMode, questionDimensions } from '../core/ratings';
 import { resolveReferences } from '../core/references';
 import type { DimensionRatings } from '../core/model';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, Image as ImageIcon, Info, Maximize2, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, Image as ImageIcon, Info, Maximize2, Minimize2, PanelLeft, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import type { Asset, AssetMetadata, Evaluation, MediaCheck, ProjectBundle, TagAssignment } from '../core/model';
 import type { Severity } from '../core/scoring';
 import { dimensionScore } from '../core/scoring';
@@ -17,6 +17,8 @@ type Props = {
   onSave: (record: Evaluation, newAssets: Asset[], referenceChange?: { id: string; expectedHeadId: string | null; assetIds: string[] }) => Promise<void>;
   onToast: (message: string) => void;
   onBulkImport?: () => void;
+  focusMode?: boolean;
+  onFocusChange?: (value: boolean) => void;
   initialQuestionId?: string;
 };
 
@@ -43,7 +45,7 @@ function checkImage(file: File): Promise<void> {
   });
 }
 
-export default function FormalEvaluation({ bundle, onSave, onToast, initialQuestionId, onBulkImport }: Props) {
+export default function FormalEvaluation({ bundle, onSave, onToast, initialQuestionId, onBulkImport, focusMode = false, onFocusChange }: Props) {
   const { project } = bundle;
   const [questionId, setQuestionId] = useState(() => project.questions.find(q => q.id === initialQuestionId)?.id ?? project.questions[0]?.id ?? '');
   const [productId, setProductId] = useState(project.products[0]?.id ?? '');
@@ -51,6 +53,8 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   const [search, setSearch] = useState('');
   const [briefExpanded, setBriefExpanded] = useState(() => !latestEvaluations(bundle.evaluations).find(record => record.projectId === project.id && record.questionId === questionId && record.productId === productId)?.mediaIds.length);
   const [contextChecksOpen, setContextChecksOpen] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [focusQuestionsOpen, setFocusQuestionsOpen] = useState(false);
   const [outputs, setOutputs] = useState<Asset[]>([]);
   const [references, setReferences] = useState<Asset[]>([]);
   const [referencePool, setReferencePool] = useState<AssetMetadata[]>([]);
@@ -136,6 +140,10 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
   useEffect(() => {
     if (evidenceRef.current) evidenceRef.current.scrollTop = 0;
   }, [briefExpanded]);
+
+  useEffect(() => {
+    if (focusMode && focusQuestionsOpen) document.querySelector('.formal-question.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focusMode, focusQuestionsOpen]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -432,15 +440,26 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
     </div>;
   }
 
-  return <div className="formal-page">
-    <header className="page-heading formal-heading">
-      <div><div className="eyebrow">EVALUATION WORKSPACE</div><h1>逐题评测</h1><p>对照需求与原始输出，评分并保存每次评测记录。</p></div>
-      <div className="formal-heading-actions">{onBulkImport && <button className="btn btn-small" disabled={loading || busy} onClick={onBulkImport}><Upload size={14}/>批量导图</button>}<div className="formal-local"><span />原图与记录仅保存在本机<span className="pill">{product.demo ? '模拟产品' : '正式项目'}</span></div></div>
+  return <div className={`formal-page${focusMode ? ' is-focus-mode' : ''}${focusQuestionsOpen ? ' focus-questions-open' : ''}`}>
+    <header className="formal-evaluation-toolbar">
+      <div className="formal-toolbar-context"><h1>逐题评测</h1><span title={project.name}>{focusMode ? project.name : `已提交 ${completed} / ${project.questions.length} 题`}</span></div>
+      {focusMode && <div className="formal-toolbar-navigation">
+        <button className="formal-toolbar-icon" onClick={() => setFocusQuestionsOpen(previous => !previous)} aria-label={focusQuestionsOpen ? '收起题目列表' : '展开题目列表'} title="题目列表" aria-expanded={focusQuestionsOpen} aria-controls="formal-question-navigation"><PanelLeft size={16}/></button>
+        <button className="formal-toolbar-icon" disabled={position === 0 || locked} onClick={() => navigate(project.questions[position - 1].id)} aria-label="上一道评测题" title="上一题"><ChevronLeft size={16}/></button>
+        <select aria-label="跳转评测题目" value={questionId} disabled={locked} onChange={event => navigate(event.target.value)}>{project.questions.map((item, index) => <option value={item.id} key={item.id}>{index + 1} / {project.questions.length} · {item.id} · {item.title}</option>)}</select>
+        <button className="formal-toolbar-icon" disabled={position >= project.questions.length - 1 || locked} onClick={() => navigate(project.questions[position + 1].id)} aria-label="下一道评测题" title="下一题"><ChevronRight size={16}/></button>
+      </div>}
+      <div className="formal-toolbar-actions">
+        {onBulkImport && !focusMode && <button className="btn btn-small" disabled={loading || busy} onClick={onBulkImport}><Upload size={14}/>批量导图</button>}
+        <button className="formal-toolbar-icon" aria-label="评测操作说明" title="评测操作说明" aria-expanded={instructionsOpen} aria-controls="formal-evaluation-instructions" onClick={() => setInstructionsOpen(previous => !previous)}><Info size={16}/></button>
+        {onFocusChange && <button className={`btn btn-small formal-focus-toggle${focusMode ? ' active' : ''}`} onClick={() => onFocusChange(!focusMode)} aria-pressed={focusMode} title={focusMode ? '退出专注评测（Esc）' : '收起导航，扩大图片与评分区域'}>{focusMode ? <Minimize2 size={14}/> : <Maximize2 size={14}/>}<span>{focusMode ? '退出专注' : '专注评测'}</span></button>}
+      </div>
     </header>
-    <div className={`formal-notice ${blockedReasons.length ? 'warning' : ''}`}><Info size={16} /><div>{blockedReasons.length ? <><strong>可先记录草稿</strong> · {blockedReasons.join('；')}，补齐后才能正式提交。</> : <><strong>独立评测</strong> · 上传本次生成的全部原图，逐张检查后选出最佳图。保存后可继续编辑，每次修订均保留历史。</>}</div></div>
+    {blockedReasons.length > 0 && <div className="formal-notice warning" role="status"><Info size={16}/><div><strong>可先记录草稿</strong> · {blockedReasons.join('；')}，补齐后才能正式提交。</div></div>}
+    {instructionsOpen && <div className="formal-notice formal-instructions" id="formal-evaluation-instructions"><Info size={16}/><div><strong>独立评测</strong> · 对照题目需求，上传本次生成的全部原图，逐张检查并选择最佳图，再按维度评分。保存后可继续编辑，每次修订均保留历史。图片和记录仅保存在本机；跨设备使用阶段同步或备份。{focusMode && ' 专注模式可用顶部切题或展开题目列表，按 Esc 退出。'}</div><button aria-label="收起操作说明" onClick={() => setInstructionsOpen(false)}><X size={14}/></button></div>}
 
     <div className="formal-layout" aria-busy={loading || busy}>
-      <aside className="panel formal-questions">
+      <aside className="panel formal-questions" id="formal-question-navigation" aria-label="评测题目导航">
         <div className="formal-question-top"><div className="formal-section-title"><h2>评测题目</h2><span>{project.questions.length}</span></div>
           <div className="formal-progress-label"><span>当前产品已提交</span><strong aria-label={`当前产品已提交 ${completed} / ${project.questions.length} 题`}>{completed}<small> / {project.questions.length}</small></strong></div>
           <div className="formal-progress"><span style={{ width: `${completed / project.questions.length * 100}%` }} /></div>

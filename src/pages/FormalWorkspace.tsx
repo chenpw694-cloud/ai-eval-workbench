@@ -63,6 +63,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [evaluationFocus, setEvaluationFocus] = useState(false);
   const restoreInput = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dirty = useRef(false);
@@ -138,6 +139,19 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
     return () => { active = false; };
   }, [route.id, route.section === 'trash']);
 
+  useEffect(() => {
+    setEvaluationFocus(false);
+  }, [route.id, route.section]);
+
+  useEffect(() => {
+    if (route.section !== 'evaluation' || !evaluationFocus) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('dialog[open]')) setEvaluationFocus(false);
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [route.section, evaluationFocus]);
+
   function openProjectAction(type: ProjectAction['type'], target: Project) {
     setActionError('');
     setProjectAction({type, project: target});
@@ -205,7 +219,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
   const locked = project?.status === 'active' || Boolean(bundle?.evaluations.some(record => record.status === 'submitted'));
   const formalCount = projects.length;
 
-  return <div className={`app-shell formal-workspace${route.section === 'evaluation' && bundle && !loading && !error && !selectedTrashed ? ' formal-evaluation-workspace' : ''}`}>
+  return <div className={`app-shell formal-workspace${route.section === 'evaluation' && bundle && !loading && !error && !selectedTrashed ? ` formal-evaluation-workspace${evaluationFocus ? ' formal-focus-workspace' : ''}` : ''}`}>
     <aside className="sidebar">
       <button className="brand" onClick={() => go(null)} aria-label="正式项目列表">
         <span className="brand-mark"><Layers3 size={23}/></span>
@@ -278,7 +292,7 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
             }}/> }
             {route.section === 'setup' && <ProjectSetup key={project.id} project={project} locked={locked} onSave={updateProject} onToast={notify} onRestart={() => openProjectAction('restart', project)} onTrash={() => openProjectAction('trash', project)}/>}
             {route.section === 'images' && <BulkImages key={project.id} bundle={bundle} onRefresh={refresh} onToast={notify} onEvaluate={() => go(project.id, 'evaluation')}/>}
-            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} onToast={notify} onBulkImport={() => go(project.id, 'images')} onSave={async (record, assets, referenceChange) => {
+            {route.section === 'evaluation' && <FormalEvaluation key={project.id} bundle={bundle} focusMode={evaluationFocus} onFocusChange={setEvaluationFocus} onToast={notify} onBulkImport={() => go(project.id, 'images')} onSave={async (record, assets, referenceChange) => {
               await saveEvaluation(project.id, record, assets, referenceChange);
               await refresh();
             }}/>}

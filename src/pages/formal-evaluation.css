@@ -24,6 +24,21 @@
 .formal-page .btn-small { min-height: 28px; padding: 6px 8px; font-size: 10px; }
 .formal-page h3 { margin: 0; font-size: 12px; font-weight: 600; }
 .formal-page .formal-help { font-size: 10px; color: #9a9faf; line-height: 1.8; margin: 8px 0 12px; }
+.formal-evaluation-toolbar { display: flex; flex-wrap: wrap; align-items: center; flex-shrink: 0; gap: 10px 16px; min-height: 40px; margin-bottom: 10px; }
+.formal-toolbar-context { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.formal-toolbar-context h1 { font-size: 18px; font-weight: 650; color: #4a4c62; margin: 0; white-space: nowrap; }
+.formal-toolbar-context > span { font-size: 10px; color: #9a91a8; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.formal-toolbar-actions { margin-left: auto; display: flex; align-items: center; flex-shrink: 0; gap: 9px; }
+.formal-page .formal-toolbar-actions > .btn { min-height: 34px; font-size: 11px; padding: 7px 10px; }
+.formal-toolbar-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 34px; height: 34px; padding: 0; border: 1px solid #e7e2ef; border-radius: 7px; color: #9686ab; background: #fff; cursor: pointer; }
+.formal-toolbar-icon:hover { border-color: #c7b7df; background: #f7f3fd; }
+.formal-page .formal-focus-toggle { background: linear-gradient(135deg, #faf7ff, #f2edfc); border-color: #dfd4f2; color: #8a71af; }
+.formal-page .formal-focus-toggle.active { background: #f1eafd; border-color: #cfbce9; color: #8162a9; }
+.formal-toolbar-navigation { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.formal-toolbar-navigation select { min-width: 0; width: 200px; max-width: 25vw; height: 34px; border: 1px solid #e6deef; border-radius: 6px; background: #fff; color: #91809f; padding: 5px 7px; font-size: 11px; text-overflow: ellipsis; }
+.formal-page .formal-instructions { max-height: 90px; overflow-y: auto; flex-shrink: 0; }
+.formal-instructions > div { flex: 1; }
+.formal-instructions > button { display: flex; color: #a696b9; padding: 3px; }
 
 .formal-questions { height: calc(100vh - 195px); min-height: 650px; display: flex; flex-direction: column; }
 .formal-question-top { padding: 17px 13px 13px; border-bottom: 1px solid #f0f1f5; }
@@ -412,12 +427,61 @@
 }
 
 @media (min-width: 751px) and (max-height: 550px) {
-  .formal-evaluation-workspace .formal-page .formal-heading,
-  .formal-evaluation-workspace .formal-notice:not(.warning) { display: none; }
+  .formal-evaluation-workspace .formal-page .formal-heading { display: none; }
   .formal-evaluation-workspace .formal-rating-footer { grid-template-columns: 44px minmax(0, 1fr); padding: 12px; gap: 8px; }
   .formal-evaluation-workspace .formal-rating-footer.has-next { grid-template-columns: 44px minmax(0, 1.1fr) minmax(0, 1fr); }
   .formal-evaluation-workspace .formal-rating-footer .btn { font-size: 9px; padding: 10px 6px; }
   .formal-evaluation-workspace .formal-rating-footer .btn:first-child { font-size: 0; gap: 0; }
   .formal-evaluation-workspace .formal-rating-footer .formal-draft-next { grid-column: auto; }
   .formal-evaluation-workspace .formal-main-image { height: 220px; }
+}
+
+/* Keep chrome compact by default; focus mode gives the task all available space. */
+.formal-evaluation-workspace .formal-context { display: none; }
+.formal-focus-workspace > .sidebar,
+.formal-focus-workspace .workspace-main > .topbar { display: none; }
+.formal-focus-workspace .workspace-main { margin-left: 0; }
+.formal-focus-workspace .toast { left: 50%; }
+.is-focus-mode:not(.focus-questions-open) .formal-questions { display: none; }
+
+@media (min-width: 751px) {
+  .formal-evaluation-workspace .topbar { height: 44px; min-height: 44px; }
+  .formal-evaluation-workspace .formal-main { padding-top: 10px; padding-bottom: 12px; }
+  .formal-evaluation-workspace .formal-notice { margin-bottom: 8px; padding: 6px 10px; max-height: 80px; overflow-y: auto; }
+  .formal-focus-workspace .formal-main { padding: 10px 16px 12px; }
+  .formal-focus-workspace .formal-evaluation-toolbar { margin-bottom: 8px; }
+  .formal-focus-workspace .formal-page:not(.focus-questions-open) .formal-layout { grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr); }
+  .formal-focus-workspace .formal-page.focus-questions-open .formal-layout { grid-template-columns: 170px minmax(0, 1fr) 360px; }
+  .formal-focus-workspace .formal-rating-footer { padding: 14px 16px 16px; gap: 10px; }
+  .formal-focus-workspace .formal-rating-footer p { display: none; }
+  .formal-focus-workspace .formal-main-image,
+  .formal-focus-workspace .formal-question-context + .formal-evidence-scroll .formal-main-image { height: clamp(180px, calc(100dvh - 265px), 620px); }
+  .formal-focus-workspace .formal-question-context:has(.formal-context-checks) + .formal-evidence-scroll .formal-main-image { height: clamp(140px, calc(100dvh - 395px), 490px); }
+}
+
+@media (min-width: 751px) and (max-width: 1080px) {
+  .formal-focus-workspace .formal-page:not(.focus-questions-open) .formal-questions { display: none; }
+  .formal-focus-workspace .formal-page:not(.focus-questions-open) .formal-layout { grid-template-columns: minmax(0, 1fr) 325px; grid-template-rows: minmax(0, 1fr); }
+  .formal-focus-workspace .formal-page.focus-questions-open .formal-layout { grid-template-columns: minmax(0, 1fr) 325px; grid-template-rows: auto minmax(0, 1fr); }
+  .formal-focus-workspace .formal-toolbar-context > span { display: none; }
+  .formal-focus-workspace .formal-toolbar-navigation select { width: 185px; }
+}
+
+@media (min-width: 751px) and (max-height: 550px) {
+  .formal-evaluation-toolbar { min-height: 34px; margin-bottom: 6px; }
+  .formal-focus-workspace .formal-main-image,
+  .formal-focus-workspace .formal-question-context + .formal-evidence-scroll .formal-main-image { height: clamp(120px, calc(100dvh - 230px), 280px); }
+  .formal-focus-workspace .formal-question-context:has(.formal-context-checks) + .formal-evidence-scroll .formal-main-image { height: clamp(100px, calc(100dvh - 330px), 180px); }
+  .formal-focus-workspace .formal-rating-footer { padding: 10px; gap: 8px; }
+}
+
+@media (max-width: 750px) {
+  .formal-focus-workspace .formal-main { padding: 10px 12px; }
+  .formal-evaluation-toolbar { gap: 8px; }
+  .formal-toolbar-context > span { display: none; }
+  .formal-toolbar-context h1 { font-size: 16px; }
+  .formal-toolbar-actions { gap: 6px; }
+  .formal-toolbar-navigation { order: 3; flex-basis: 100%; }
+  .formal-toolbar-navigation select { width: auto; max-width: none; flex: 1; }
+  .formal-page .formal-toolbar-actions > .btn { font-size: 10px; padding: 6px 8px; }
 }
