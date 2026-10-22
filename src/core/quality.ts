@@ -57,7 +57,7 @@ export function latestQuality<T extends { id: string; parentId: string | null }>
   for (const row of rows.filter(row => !parents.has(row.id))) groups.set(key(row), [...groups.get(key(row)) ?? [], row]);
   return [...groups.values()].filter(group => group.length === 1).map(group => group[0]);
 }
-export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, seed: string, newId: () => string, now: string, sourceBatchId: string | null = null): QualityState {
+export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, seed: string, newId: () => string, now: string, sourceBatchId: string | null = null, gsbProductIds?: string[]): QualityState {
   if (!seed.trim()) throw new Error('请填写可追溯的抽样种子');
   const preparation = validateProject(bundle.project);
   if (preparation.length) throw new Error(preparation.join('；'));
@@ -66,7 +66,7 @@ export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, see
   if (!bundle.project.rulesConfirmed || bundle.project.questions.length !== bundle.project.expectedQuestionCount) throw new Error('先补齐题库并确认评分规则');
   if (bundle.project.members.length < 2) throw new Error('独立评审至少需要两位成员');
   const state = structuredClone(bundle.quality ?? emptyQuality());
-  if (state.batches.some(batch => batch.kind === kind && batch.sourceBatchId === sourceBatchId)) throw new Error('已有同类固定批次；请继续原任务，不能重抽以改变样本');
+  if (kind !== 'gsb' && state.batches.some(batch => batch.kind === kind && batch.sourceBatchId === sourceBatchId)) throw new Error('已有同类固定批次；请继续原任务，不能重抽以改变样本');
   const products = bundle.project.products.filter(product => !product.demo);
   const heads = latestEvaluations(bundle.evaluations);
   const head = (productId: string, questionId: string) => heads.find(row => row.productId === productId && row.questionId === questionId);
@@ -95,8 +95,11 @@ export function createQualityBatch(bundle: ProjectBundle, kind: QualityKind, see
   } else if (kind === 'gsb') {
     const self = bundle.project.products.filter(product => product.role === 'self');
     if (self.length !== 1) throw new Error('GSB 需要配置且仅配置一个自家产品（可以明确标为模拟）');
+    const selected = gsbProductIds ?? bundle.project.products.filter(product => product.id !== self[0].id).map(product => product.id);
+    if (!selected.length || new Set(selected).size !== selected.length || selected.some(id => id === self[0].id || !bundle.project.products.some(product => product.id === id))) throw new Error('请选择有效且不重复的竞品，不能选择自家产品');
+    if (state.tasks.some(task => task.kind === 'gsb' && selected.includes(task.evidence[1]?.productId))) throw new Error('已有该竞品的固定 GSB 任务，请继续原任务，不能重复建立');
     batch.sampled = candidates;
-    for (const questionId of candidates) for (const competitor of bundle.project.products.filter(product => product.id !== self[0].id)) add(questionId, [self[0].id, competitor.id], competitor.ownerId);
+    for (const questionId of candidates) for (const competitor of bundle.project.products.filter(product => selected.includes(product.id))) add(questionId, [self[0].id, competitor.id], competitor.ownerId);
   } else {
     let targets = products;
     if (kind === 'recheck') {

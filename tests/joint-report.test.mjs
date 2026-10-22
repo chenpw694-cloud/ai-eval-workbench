@@ -5,10 +5,13 @@ import { fixture } from './helpers/formal-fixture.mjs';
 import { createJointPlan, jointSummary, latestRankings, validateJoint, mergeJoint } from '../src/core/joint.ts';
 import { emptyQuality, blindQualityBundle, createQualityBatch, mergeQuality, validateQuality, validateQualityExtension } from '../src/core/quality.ts';
 import { emptyReportNotes, latestReportNotes, validateReportNotes } from '../src/core/report-notes.ts';
-import { buildReport, reportMarkdown } from '../src/core/report.ts';
+import { buildReport as buildCurrentReport, reportMarkdown as currentMarkdown } from '../src/core/report.ts';
 import { buildStagePackage, readStagePackage } from '../src/core/packages.ts';
 import { planMerge } from '../src/core/merge.ts';
 
+// These tests retain the archived v2 joint-review contract. Current self-only flow has separate coverage.
+const reportMarkdown=report=>currentMarkdown(report,'report-v2');
+const buildReport=(bundle,basis,stamp)=>buildCurrentReport(bundle,basis,stamp,false,{reportVersion:'report-v2'});
 const stamp='2026-10-20T12:00:00.000Z';let seq=0;const id=()=>`j-${++seq}`;
 function setup(count=50){
   const b=fixture(3,count);b.project.scheme.policies.rankingTies='dense';

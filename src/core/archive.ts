@@ -2,7 +2,7 @@ import { isAnchorMode } from './ratings.ts';
 import type { Asset, Project, ProjectBundle, StageAudit } from './model.ts';
 import { buildStagePackage, hashBlob, readStagePackage } from './packages.ts';
 import { buildReport, reportMarkdown } from './report.ts';
-import type { Report, ReportBasis, ReportCheck, ReportVersion } from './report.ts';
+import type { Report, ReportBasis, ReportCheck, ReportVersion, ReportBuildOptions } from './report.ts';
 import type { RatingValidationOptions } from './ratings.ts';
 import { canonicalJoint } from './joint.ts';
 import { latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
@@ -44,7 +44,7 @@ export function archiveContent(bundle: ProjectBundle): unknown {
 }
 export const archiveContentHash = (bundle: ProjectBundle) => hashValue(archiveContent(bundle));
 
-export function archiveReadiness(bundle: ProjectBundle, basis: ReportBasis, createdAt: string, input: Pick<ArchiveInput,'scopeConfirmed'|'featuresConfirmed'|'conclusionsConfirmed'|'demo'>, mediaVerified = false, options: RatingValidationOptions = {}) {
+export function archiveReadiness(bundle: ProjectBundle, basis: ReportBasis, createdAt: string, input: Pick<ArchiveInput,'scopeConfirmed'|'featuresConfirmed'|'conclusionsConfirmed'|'demo'>, mediaVerified = false, options: ReportBuildOptions = {}) {
   const report = buildReport(bundle, basis, createdAt, input.demo, options);
   const checks = report.checks.map(check => check.id === 'media' ? {...check, passed:mediaVerified, detail:mediaVerified?'本次归档的全部原图已读取并完成 SHA-256 校验，清单与所有 ZIP 必须一起保存。':'生成归档时逐图校验；当前尚未生成完整文件组。'} : check);
   const heads = latestEvaluations(bundle.evaluations);
@@ -106,7 +106,7 @@ export async function buildFinalArchive(source: ArchiveSource, input: ArchiveInp
   const stage=await buildStagePackage({bundle,snapshots:frozen.snapshots,audits:frozen.audits,kind:'baseline',senderId:input.operatorId,productIds:bundle.project.products.map(p=>p.id)},loader,{packageId:archiveId,now:createdAt,partBytes:options.partBytes});
   const sourceHash=await archiveContentHash(bundle);
   const checked=archiveReadiness(bundle,input.basis,createdAt,input,true);
-  const manifest:ArchiveManifest={format:'eval-studio-final-archive',schemaVersion:1,calculationVersion:isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1',reportVersion:'report-v2',archiveId,projectId:bundle.project.id,projectName:bundle.project.name,mode:input.mode,basis:input.basis,createdAt,operatorId:input.operatorId,reason:input.reason.trim(),demo:input.demo,
+  const manifest:ArchiveManifest={format:'eval-studio-final-archive',schemaVersion:1,calculationVersion:isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1',reportVersion:'report-v3',archiveId,projectId:bundle.project.id,projectName:bundle.project.name,mode:input.mode,basis:input.basis,createdAt,operatorId:input.operatorId,reason:input.reason.trim(),demo:input.demo,
     confirmations:{scope:input.scopeConfirmed,conclusions:input.conclusionsConfirmed,features:input.featuresConfirmed},scope:{realProductIds:bundle.project.products.filter(p=>!p.demo).map(p=>p.id),simulatedProductIds:bundle.project.products.filter(p=>p.demo).map(p=>p.id),questionCount:bundle.project.questions.length,selfConfigured:bundle.project.products.some(p=>p.role==='self')},sourceHash,stageManifestHash:stage.manifest.manifestHash,checks:checked.checks,files:[],manifestHash:''};
   const reportJson=jsonBlob(archiveReport(checked.report,manifest));
   const files:ArchiveFile[]=[...stage.files,{name:`${archiveId}.report.json`,blob:reportJson},{name:`${archiveId}.report.md`,blob:new Blob([archivedMarkdown(checked.report,manifest)],{type:'text/markdown;charset=utf-8'})}];
@@ -128,7 +128,7 @@ export async function readFinalArchive(files: File[]): Promise<{record:ArchiveRe
   if(!object(raw)||raw.format!=='eval-studio-final-archive'||raw.schemaVersion!==1||!identity(raw.archiveId)||headers[0].name!==`${raw.archiveId}.archive.json`||typeof raw.projectId!=='string'||typeof raw.projectName!=='string'||!['checkpoint','final'].includes(String(raw.mode))||!['original','adjudicated-reference'].includes(String(raw.basis))||typeof raw.createdAt!=='string'||!Number.isFinite(Date.parse(raw.createdAt))||typeof raw.operatorId!=='string'||typeof raw.reason!=='string'||!raw.reason.trim()||raw.reason.length>10000||typeof raw.demo!=='boolean'||!hash(raw.sourceHash)||!hash(raw.stageManifestHash)||!hash(raw.manifestHash)||!validConfirmations(raw.confirmations)||!object(raw.scope)||!Array.isArray(raw.checks)||!Array.isArray(raw.files)||raw.files.length>259)throw new Error('归档清单结构、标识或口径无效');
   const manifest=raw as unknown as ArchiveManifest;
   if(!['ecommerce-v1','ecommerce-anchors-v1'].includes(manifest.calculationVersion))throw new Error('此归档计算版本暂不支持，请使用对应版本工作台校验');
-  if(manifest.reportVersion!==undefined&&!['report-v1','report-v2'].includes(manifest.reportVersion))throw new Error('此归档报告版本暂不支持，请使用对应版本工作台校验');
+  if(manifest.reportVersion!==undefined&&!['report-v1','report-v2','report-v3'].includes(manifest.reportVersion))throw new Error('此归档报告版本暂不支持，请使用对应版本工作台校验');
   const {manifestHash:_hash,...unsigned}=manifest;if(await hashValue(unsigned)!==manifest.manifestHash)throw new Error('归档清单 SHA-256 校验失败');
   if(new Set(manifest.files.map(row=>row?.name)).size!==manifest.files.length||files.length!==manifest.files.length+1)throw new Error('归档缺少文件、混入额外文件或清单存在重名');
   for(const row of manifest.files){
@@ -143,7 +143,7 @@ export async function readFinalArchive(files: File[]): Promise<{record:ArchiveRe
   const bundle=stage.manifest.bundle;
   if(manifest.calculationVersion!==(isAnchorMode(bundle.project.scheme)?'ecommerce-anchors-v1':'ecommerce-v1'))throw new Error('归档计算版本与评分方式不一致');
   const input:ArchiveInput={mode:manifest.mode,basis:manifest.basis,operatorId:manifest.operatorId,reason:manifest.reason,demo:manifest.demo,scopeConfirmed:manifest.confirmations.scope,featuresConfirmed:manifest.confirmations.features,conclusionsConfirmed:manifest.confirmations.conclusions};
-  const reportOptions:RatingValidationOptions={legacyRequiredReasons:manifest.reportVersion===undefined||manifest.reportVersion==='report-v1'};
+  const reportOptions:ReportBuildOptions={reportVersion:manifest.reportVersion??'report-v1',legacyRequiredReasons:manifest.reportVersion===undefined||manifest.reportVersion==='report-v1'};
   validateInput(bundle,input,reportOptions);
   const expectedScope={realProductIds:bundle.project.products.filter(p=>!p.demo).map(p=>p.id),simulatedProductIds:bundle.project.products.filter(p=>p.demo).map(p=>p.id),questionCount:bundle.project.questions.length,selfConfigured:bundle.project.products.some(p=>p.role==='self')};
   if(stage.manifest.kind!=='baseline'||stage.manifest.packageId!==manifest.archiveId||stage.manifest.exportedAt!==manifest.createdAt||stage.manifest.senderId!==manifest.operatorId||stage.manifest.manifestHash!==manifest.stageManifestHash||bundle.project.id!==manifest.projectId||bundle.project.name!==manifest.projectName||await archiveContentHash(bundle)!==manifest.sourceHash||canonicalJoint(expectedScope)!==canonicalJoint(manifest.scope))throw new Error('归档项目、范围或数据快照与清单不同');

@@ -1,7 +1,7 @@
 import AnchorRatings from '../components/AnchorRatings';
 import { isAnchorMode, ratingErrors } from '../core/ratings';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, RotateCcw, Settings2, ShieldCheck, Trash2, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, Columns2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, RotateCcw, Settings2, ShieldCheck, Trash2, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
 import type { Evaluation, Experience, Project, ProjectBundle, TagAssignment, Walkthrough } from '../core/model';
 import { latestEvaluations, summarizeProject, validateProject, allowedSeverities } from '../core/assessment';
 import { createProject, exportProject, getProjectBundle, listProjects, restoreProject, saveEvaluation, saveProject, saveWalkthroughs } from '../storage/projects';
@@ -21,7 +21,7 @@ import ReportWorkspace from './ReportWorkspace';
 import ArchiveWorkspace from './ArchiveWorkspace';
 import './formal-workspace.css';
 
-type Section = 'overview' | 'setup' | 'images' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'joint' | 'report' | 'archive' | 'independent' | 'trash';
+type Section = 'overview' | 'setup' | 'images' | 'evaluation' | 'walkthrough' | 'results' | 'backup' | 'sync' | 'quality' | 'gsb' | 'joint' | 'report' | 'archive' | 'independent' | 'trash';
 const sections = [
   { id: 'overview', label: '项目总览', icon: LayoutDashboard },
   { id: 'setup', label: '项目与题库', icon: Settings2 },
@@ -29,8 +29,8 @@ const sections = [
   { id: 'evaluation', label: '逐题评测', icon: ListTodo },
   { id: 'walkthrough', label: '走查与成本', icon: SlidersHorizontal },
   { id: 'results', label: '实际得分', icon: ChartNoAxesCombined },
+  { id: 'gsb', label: '自家对比 GSB', icon: Columns2 },
   { id: 'quality', label: '质量控制', icon: ShieldCheck },
-  { id: 'joint', label: '联合排名', icon: Layers3 },
   { id: 'report', label: '报告与检查', icon: FileCheck2 },
   { id: 'archive', label: '版本归档', icon: Database },
   { id: 'sync', label: '阶段同步', icon: FolderSync },
@@ -41,7 +41,7 @@ function currentRoute(): { id: string | null; section: Section } {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   return {
     id: parts[0] === 'projects' && parts[1] && !['import', 'independent', 'archives', 'trash'].includes(parts[1]) ? parts[1] : null,
-    section: parts[1] === 'trash' ? 'trash' : parts[1] === 'archives' ? 'archive' : parts[1] === 'independent' ? 'independent' : parts[1] === 'import' ? 'sync' : sections.some(item => item.id === parts[2]) ? parts[2] as Section : 'overview'
+    section: parts[1] === 'trash' ? 'trash' : parts[1] === 'archives' ? 'archive' : parts[1] === 'independent' ? 'independent' : parts[1] === 'import' ? 'sync' : (parts[2] === 'joint' || sections.some(item => item.id === parts[2])) ? parts[2] as Section : 'overview'
   };
 }
 
@@ -301,7 +301,8 @@ export default function FormalWorkspace({ onDemo }: { onDemo: () => void }) {
               await saveWalkthroughs(project.id, walkthroughs, experiences);
               await refresh();
             }}/>}
-            {route.section === 'quality' && <QualityWorkspace bundle={bundle} onRefresh={refresh} onToast={notify}/>}
+            {route.section === 'quality' && <QualityWorkspace key="quality" bundle={bundle} onRefresh={refresh} onToast={notify}/>}
+            {route.section === 'gsb' && <QualityWorkspace key="gsb" gsbOnly bundle={bundle} onRefresh={refresh} onToast={notify}/>}
             {route.section === 'joint' && <JointWorkspace key={project.id} bundle={bundle} onToast={notify} onSave={async state => { await saveQuality(bundle, state); await refresh(); }}/>}
             {route.section === 'report' && <ReportWorkspace key={project.id} bundle={bundle} onToast={notify} onSave={async state => { await saveQuality(bundle, state); await refresh(); }}/>}
             {route.section === 'results' && <FormalResults bundle={bundle}/>}
@@ -350,10 +351,11 @@ function FormalOverview({ bundle, onGo, onStart }: { bundle: ProjectBundle; onGo
         return <tr key={product.id}><td><strong>{product.name || '产品名称待填写'}</strong><small>{product.version || '版本或档位待填写'}{product.demo ? ' · 模拟对象' : ''}</small></td><td>{project.members.find(member => member.id === product.ownerId)?.name || '未分配'}</td><td>{result?.submitted ?? 0} / {result?.expected ?? project.expectedQuestionCount}</td><td>{result?.usableRate == null ? '—' : `${(result.usableRate * 100).toFixed(1)}%`}</td><td>{result?.total == null ? '待补齐' : (result.total * (isAnchorMode(project.scheme) ? 1 : 20)).toFixed(isAnchorMode(project.scheme) ? 2 : 1)}</td><td><Eligibility state={result?.eligibility ?? 'pending'}/></td></tr>;
       })}</tbody></table></div>
     </section>
+    <div className="formal-note"><InfoIcon/>当前分工：每人负责一个竞品的初评，再与同一套自家结果逐题做 GSB。自家素材统一准备并复用，无需进行竞品之间的联合排名。</div>
     <div className="formal-next-grid">
       <button className="panel formal-next-action" onClick={() => onGo('evaluation')}><ListTodo size={22}/><strong>逐题采集</strong><p>需求、原图、可用性、问题标签</p><ArrowRight size={16}/></button>
       <button className="panel formal-next-action" onClick={() => onGo('walkthrough')}><SlidersHorizontal size={22}/><strong>补齐产品级信息</strong><p>编辑走查、成本与商用授权</p><ArrowRight size={16}/></button>
-      <button className="panel formal-next-action" onClick={() => onGo('backup')}><Download size={22}/><strong>导出可恢复备份</strong><p>包括图片、规则快照与修订历史</p><ArrowRight size={16}/></button>
+      <button className="panel formal-next-action" onClick={() => onGo('gsb')}><Columns2 size={22}/><strong>自家对比 GSB</strong><p>汇合初评后，每人比较自己负责的竞品</p><ArrowRight size={16}/></button>
     </div>
   </>;
 }

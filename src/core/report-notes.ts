@@ -1,5 +1,6 @@
 import type { ProjectBundle } from './model.ts';
 import { canonicalJoint } from './joint.ts';
+import { fixedReportCaseIds } from './selfComparison.ts';
 
 export type ReportNotes = {
   id: string; parentId: string | null; createdAt: string; participants: string[];
@@ -16,8 +17,9 @@ export function latestReportNotes(rows: ReportNotes[] = []): ReportNotes | undef
 export function validateReportNotes(rows: ReportNotes[] | undefined, bundle: ProjectBundle): string[] {
   if (rows === undefined) return [];
   if (!Array.isArray(rows) || rows.length > 1000 || new Set(rows.map(row => row?.id)).size !== rows.length) return ['报告草稿修订结构无效'];
+  const caseIds = fixedReportCaseIds(bundle);
   for (const row of rows) {
-    if (!row || typeof row.id !== 'string' || !row.id || !Number.isFinite(Date.parse(row.createdAt)) || !['summary','productInsights','recommendations','consistencyExplanation','featureComparison','limitations','noteResolution'].every(key => typeof row[key as keyof ReportNotes] === 'string' && String(row[key as keyof ReportNotes]).length <= 20000) || !Array.isArray(row.participants) || new Set(row.participants).size !== row.participants.length || row.participants.some(id => !bundle.project.members.some(m => m.id === id)) || !Array.isArray(row.caseQuestionIds) || new Set(row.caseQuestionIds).size !== row.caseQuestionIds.length || row.caseQuestionIds.some(id => !bundle.quality?.joint?.plan.questionIds.includes(id)) || !Array.isArray(row.acknowledgedNoteIds) || new Set(row.acknowledgedNoteIds).size !== row.acknowledgedNoteIds.length || row.acknowledgedNoteIds.some(id => !bundle.evaluations.some(e => e.id === id)) || (row.parentId !== null && !rows.some(parent => parent.id === row.parentId && parent.id !== row.id))) return ['报告草稿字段或引用无效'];
+    if (!row || typeof row.id !== 'string' || !row.id || !Number.isFinite(Date.parse(row.createdAt)) || !['summary','productInsights','recommendations','consistencyExplanation','featureComparison','limitations','noteResolution'].every(key => typeof row[key as keyof ReportNotes] === 'string' && String(row[key as keyof ReportNotes]).length <= 20000) || !Array.isArray(row.participants) || new Set(row.participants).size !== row.participants.length || row.participants.some(id => !bundle.project.members.some(m => m.id === id)) || !Array.isArray(row.caseQuestionIds) || new Set(row.caseQuestionIds).size !== row.caseQuestionIds.length || row.caseQuestionIds.some(id => !caseIds.has(id)) || !Array.isArray(row.acknowledgedNoteIds) || new Set(row.acknowledgedNoteIds).size !== row.acknowledgedNoteIds.length || row.acknowledgedNoteIds.some(id => !bundle.evaluations.some(e => e.id === id)) || (row.parentId !== null && !rows.some(parent => parent.id === row.parentId && parent.id !== row.id))) return ['报告草稿字段或引用无效'];
     let cursor: ReportNotes | undefined = row; const visited = new Set<string>();
     while (cursor) { if (visited.has(cursor.id)) return ['报告草稿修订链存在循环']; visited.add(cursor.id); cursor = rows.find(parent => parent.id === cursor!.parentId); }
   }
