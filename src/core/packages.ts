@@ -1,6 +1,7 @@
 import { isAnchorMode } from './ratings.ts';
 import type { Asset, Project, ProjectBundle, StageAudit } from './model.ts';
 import { archiveSchemaVersion, hasReferenceProtocolFields, validateArchiveMetadata } from './backup.ts';
+import { unpackHandoff } from './handoff.ts';
 
 export type StagePackage = {
   format: 'eval-studio-stage-package'; schemaVersion: 1 | 2 | 3;
@@ -344,6 +345,7 @@ async function readZip(file: Blob, expectedPaths: string[]): Promise<Map<string,
 }
 
 export async function readStagePackage(files: File[]): Promise<{ manifest: StagePackage; blobs: Map<string, Blob> }> {
+  files = await unpackHandoff(files);
   if (!files.length || files.length > MAX_PARTS + 1) throw new Error('请一次选择清单 .eval.json 与全部 ZIP 分包（最多 256 包）。');
   const names = new Set<string>();
   for (const file of files) {

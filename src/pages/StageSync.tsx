@@ -6,6 +6,7 @@ import {
   PackageCheck, RefreshCw, ShieldCheck, Upload, Users, X
 } from 'lucide-react';
 import type { ProjectBundle } from '../core/model.ts';
+import { buildHandoff } from '../core/handoff';
 import type { StagePackage } from '../core/packages.ts';
 import { commitStage, exportStage, inspectStage, listStageReceipts } from '../storage/stages.ts';
 import { PageHeading, PanelHeading, Pill } from '../ui';
@@ -124,6 +125,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
   const [senderId, setSenderId] = useState('');
   const [exported, setExported] = useState<ExportResult | null>(null);
   const [downloaded, setDownloaded] = useState<string[]>([]);
+  const [handoffDownloaded, setHandoffDownloaded] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [sourceFiles, setSourceFiles] = useState<{ name: string; size: number }[]>([]);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
@@ -131,7 +133,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
   const [reason, setReason] = useState('');
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [receiptError, setReceiptError] = useState('');
-  const [busy, setBusy] = useState<'export' | 'inspect' | 'commit' | 'refresh' | null>(null);
+  const [busy, setBusy] = useState<'export' | 'inspect' | 'commit' | 'refresh' | 'bundle' | null>(null);
   const [error, setError] = useState('');
   const [committedPackageId, setCommittedPackageId] = useState('');
   const input = useRef<HTMLInputElement>(null);
@@ -139,7 +141,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
   const activeProjectRef = useRef(project?.id ?? '');
 
   const unresolvedPreview = inspection !== null;
-  const pendingDownloads = exported !== null && downloaded.length < exported.files.length;
+  const pendingDownloads = exported !== null && !handoffDownloaded && downloaded.length < exported.files.length;
   const unsaved = unresolvedPreview || pendingDownloads;
   dirtyRef.current = unsaved || busy !== null;
 
@@ -164,7 +166,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
     if (activeProjectRef.current !== (project?.id ?? '')) {
       activeProjectRef.current = project?.id ?? '';
       setExported(null);
-      setDownloaded([]);
+      setDownloaded([]); setHandoffDownloaded(false);
       setSenderId('');
       setInspection(null);
       setSourceFiles([]);
@@ -209,8 +211,8 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
     try {
       const result = await exportStage(project.id, kind, senderId);
       setExported(result);
-      setDownloaded([]);
-      onToast(`已生成${kindLabels[kind]}，请逐项下载清单与全部分包`);
+      setDownloaded([]); setHandoffDownloaded(false);
+      onToast(`已生成${kindLabels[kind]}，可一键下载团队交接 ZIP`);
       try {
         await onRefresh();
       } catch (refreshError) {
@@ -221,6 +223,16 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
     } finally {
       setBusy(null);
     }
+  }
+
+  async function downloadTeamZip() {
+    if (!exported || busy) return; setBusy('bundle'); setError('');
+    try {
+      const preview = await (await import('../core/readableWorkbook')).readableWorkbook(exported.manifest.bundle);
+      const blob = await buildHandoff(exported.files, preview);
+      saveFile(`${project?.name.replace(/[\\/:*?"<>|]/g, '_') || '评测项目'}-${kindLabels[exported.manifest.kind]}-团队交接包.zip`, blob);
+      setHandoffDownloaded(true); onToast('团队交接 ZIP 已下载；把这一个文件发给成员即可，接收者无需解压');
+    } catch (error) { setError(errorMessage(error)); } finally { setBusy(null); }
   }
 
   async function readFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -307,7 +319,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
 
     <div className="stage-sync-intro"><span><Users size={23} /></span><div>
       <strong>各自独立记录，在阶段节点汇合</strong>
-      <p>网页不会实时上传数据。发送者下载清单和全部 ZIP 分包，通过团队自选方式传递；接收者一起选择文件，先检查再导入。</p>
+      <p>网页不会实时上传数据。发送者下载一个团队交接 ZIP，发给成员；接收者直接选择这个 ZIP，先预览再确认，无需解压或查看 JSON。</p>
     </div><ArrowRight size={21} /></div>
 
     <div className="stage-flow">
@@ -316,7 +328,7 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
       <div><span>03</span><strong>负责人汇合</strong><small>检查差异、合并并留存收据</small></div>
     </div>
 
-    <div className="stage-scope-note"><Info size={15} /><p>准备分发包不含评分；汇总主包包含已合并判断和审计，不能作为盲复评包。分发或开始评测后，项目题库、产品分工及规则快照冻结。</p></div>
+    <div className="stage-scope-note"><Info size={15} /><p>准备分发包不含评分；汇总主包包含已合并判断和审计，不能作为盲复评包。分发或开始评测后，项目题库和规则快照冻结，产品信息仍可更正。</p></div>
 
     {error && <div className="stage-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
 
@@ -344,13 +356,13 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
       </section>
 
       <section className="panel stage-import-panel">
-        <PanelHeading title="导入团队数据包" subtitle="支持创建同 ID 的本地项目，或与已有项目进行修订合并。" />
+        <PanelHeading title="导入团队数据包" subtitle="直接选择团队交接 ZIP；也支持之前的 JSON 清单与全部 ZIP 分包。" />
         <div className="stage-panel-body">
           <input ref={input} type="file" multiple accept=".json,.zip,application/json,application/zip" hidden onChange={readFiles} />
           <button className="stage-file-picker" disabled={busy !== null} onClick={() => input.current?.click()}>
             <span>{busy === 'inspect' ? <LoaderCircle className="spin" size={23} /> : <Upload size={23} />}</span>
-            <strong>{busy === 'inspect' ? '正在校验清单、记录与原图…' : '选择清单和全部 ZIP 分包'}</strong>
-            <small>一次多选 .json 与 .zip 文件；检查完成前不写入数据</small>
+            <strong>{busy === 'inspect' ? '正在校验清单、记录与原图…' : '选择团队交接 ZIP 或原清单与分包'}</strong>
+            <small>新的交接包只选一个 ZIP 即可，无需解压；检查完成前不写入数据</small>
           </button>
           {sourceFiles.length > 0 && <div className="stage-input-files">{sourceFiles.map((file, index) => <div key={`${file.name}-${index}`}><Files size={13} /><span>{file.name}</span><small>{fileSize(file.size)}</small></div>)}</div>}
           <div className="stage-import-principles"><span><CheckCircle2 size={13} />图片按内容哈希校验</span><span><CheckCircle2 size={13} />重复导入不重复计数</span><span><CheckCircle2 size={13} />不按时间戳覆盖分歧</span></div>
@@ -360,9 +372,12 @@ export default function StageSync({ bundle, onRefresh, onToast, onImported }: Pr
     </div>
 
     {exported && <section className="panel stage-generated-panel">
-      <PanelHeading title="数据包已生成" subtitle="请逐项下载并一起发送。为避免浏览器阻止多文件下载，不自动批量触发。" action={<Pill tone={downloaded.length === exported.files.length ? 'green' : 'orange'}>{downloaded.length} / {exported.files.length} 项已触发下载</Pill>} />
+      <PanelHeading title="数据包已生成" subtitle="推荐下载一个团队交接 ZIP。包内附可阅读的 Excel 明细，并保留评分历史与原图。" action={<Pill tone={handoffDownloaded || downloaded.length === exported.files.length ? 'green' : 'orange'}>{handoffDownloaded ? '交接 ZIP 已触发下载' : `${downloaded.length} / ${exported.files.length} 项已触发下载`}</Pill>} />
+      <div className="stage-handoff-download"><div><strong>{handoffDownloaded ? '团队交接包已触发下载' : '只传一个 ZIP，就能继续评测'}</strong><p>接收者将整个 ZIP 导入工作台；解压后可用 Excel 阅读明细。Excel 阅读副本不用于覆盖正式评分。</p></div><button className="btn btn-primary" disabled={busy !== null} onClick={() => void downloadTeamZip()}><FileArchive size={16}/>{busy === 'bundle' ? '正在打包…' : handoffDownloaded ? '再次下载团队交接 ZIP' : '下载团队交接 ZIP'}</button></div>
+      <details className="stage-original-files"><summary>原清单与分包下载（大项目或兼容旧版）</summary>
       <div className="stage-download-files">{exported.files.map(file => <div key={file.name}><span className="stage-file-icon">{file.name.endsWith('.json') ? <FileJson size={18} /> : <FileArchive size={18} />}</span><div><strong>{file.name}</strong><small>{fileSize(file.blob.size)}{file.name.endsWith('.json') ? ' · 项目清单与记录' : ' · 原图分包'}</small></div><button className="btn btn-small" disabled={busy !== null} onClick={() => { saveFile(file.name, file.blob); setDownloaded(previous => previous.includes(file.name) ? previous : [...previous, file.name]); }}>{downloaded.includes(file.name) ? <Check size={13} /> : <Download size={13} />}{downloaded.includes(file.name) ? '再次下载' : '下载'}</button></div>)}</div>
-      <div className="stage-generated-footer"><span><Info size={13} />“已触发下载”仅表示已请求浏览器下载，请检查设备中实际保存的文件。</span><button className="stage-text-button" disabled={busy !== null} onClick={() => { if (pendingDownloads && !window.confirm('还有文件未触发下载，确认关闭本次下载列表？')) return; setExported(null); setDownloaded([]); }}>关闭下载列表<X size={13} /></button></div>
+      </details>
+      <div className="stage-generated-footer"><span><Info size={13} />“已触发下载”仅表示已请求浏览器下载，请检查设备中实际保存的文件。</span><button className="stage-text-button" disabled={busy !== null} onClick={() => { if (pendingDownloads && !window.confirm('还有文件未触发下载，确认关闭本次下载列表？')) return; setExported(null); setDownloaded([]); setHandoffDownloaded(false); }}>关闭下载列表<X size={13} /></button></div>
     </section>}
 
     {inspection && localProject && <section className="panel stage-preview-panel">

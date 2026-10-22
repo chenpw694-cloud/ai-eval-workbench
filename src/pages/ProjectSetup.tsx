@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { Member, Product, ProductRole, Project, Question, Scheme } from '../core/model.ts';
 import { parseCsv, parseQuestionsJson, questionsFromRows } from '../core/questions.ts';
+import type { QuestionTable } from '../core/officeQuestions';
 import { productInfoCorrectionErrors } from '../core/projectEditing';
 import { PageHeading, PanelHeading, Pill } from '../ui';
 import './project-setup.css';
@@ -117,6 +118,11 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
   const [importError, setImportError] = useState('');
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
   const [readingFile, setReadingFile] = useState(false);
+  const [officeTables, setOfficeTables] = useState<QuestionTable[]>([]);
+  const [officeTableIndex, setOfficeTableIndex] = useState(0);
+  const [templateFormat, setTemplateFormat] = useState<'xlsx'|'docx'|'csv'>('xlsx');
+  const [questionExportFormat, setQuestionExportFormat] = useState<'xlsx'|'docx'|'json'>('xlsx');
+  const [fileActionBusy, setFileActionBusy] = useState(false);
   const [questionSearch, setQuestionSearch] = useState('');
   const [editor, setEditor] = useState<QuestionEditor | null>(null);
   const [editorError, setEditorError] = useState('');
@@ -277,18 +283,22 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
     setImportError('');
     setCsvSource(null);
     setJsonQuestions(null);
-    setFilename(file.name);
+    setFilename(file.name); setOfficeTables([]); setOfficeTableIndex(0);
     try {
       if (file.size > 20 * 1024 * 1024) throw new Error('题库文件超过 20 MB，请拆分为更小的批次。');
-      const text = await file.text();
+      const text = /\.(csv|json)$/i.test(file.name) ? await file.text() : '';
       if (/\.csv$/i.test(file.name)) {
         const parsed = parseCsv(text);
         setMapping(defaultMapping(parsed.headers));
         setCsvSource(parsed);
       } else if (/\.json$/i.test(file.name)) {
         setJsonQuestions(parseQuestionsJson(text));
+      } else if (/\.(xlsx|docx)$/i.test(file.name)) {
+        const office = await import('../core/officeQuestions');
+        const tables = /\.xlsx$/i.test(file.name) ? await office.readExcelQuestions(file) : await office.readWordQuestions(file);
+        const index = office.preferredQuestionTable(tables); setOfficeTables(tables); setOfficeTableIndex(index); setCsvSource(tables[index]); setMapping(defaultMapping(tables[index].headers));
       } else {
-        throw new Error('请选择 .csv 或 .json 格式的题库文件。');
+        throw new Error('支持 Excel .xlsx、Word .docx、CSV 和 JSON。旧版 .xls / .doc 请先另存为新格式。');
       }
     } catch (error) {
       setImportError(errorText(error));
@@ -307,7 +317,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
     if (success) {
       setCsvSource(null);
       setJsonQuestions(null);
-      setFilename('');
+      setFilename(''); setOfficeTables([]);
       setImportError('');
     }
   }
@@ -354,10 +364,21 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
     await persist({ ...draft, questions: draft.questions.filter(item => item.id !== question.id) }, '题目已从当前题库删除');
   }
 
-  function downloadTemplate() {
-    // Headers are fixed, contain no user data, and include a UTF-8 BOM for Excel.
+  async function downloadQuestionFile(template: boolean) {
+    if (fileActionBusy) return; setFileActionBusy(true);
+    try {
+      const format = template ? templateFormat : questionExportFormat, questions = template ? [] : draft.questions;
+      if (format === 'csv') downloadTemplateCsv();
+      else if (format === 'json') downloadText('当前项目题库.json', JSON.stringify(questions, null, 2), 'application/json;charset=utf-8');
+      else {
+        const blob = format === 'xlsx' ? await (await import('../core/readableWorkbook')).questionsWorkbook(questions) : await (await import('../core/wordReport')).questionsWord(questions);
+        const url = URL.createObjectURL(blob), anchor = document.createElement('a'); anchor.href = url; anchor.download = `${template ? '评测题库-空模板' : '当前项目题库'}.${format}`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }
+      onToast(template ? '题库模板已下载，填写后可导入预览' : `已导出 ${questions.length} 道题`);
+    } catch (error) { onToast(errorText(error)); } finally { setFileActionBusy(false); }
+  }
+  function downloadTemplateCsv() {
     downloadText('评测题库-空模板.csv', '\uFEFF题号,题目标题,场景,品类,难度,需求描述,验收要点,参考图文件名\r\n', 'text/csv;charset=utf-8;');
-    onToast('已生成仅含中文表头的 CSV 空模板');
   }
 
   const importDisabled = locked || saving || readingFile;
@@ -502,20 +523,21 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
       <section className="panel setup-section setup-import-section">
         <PanelHeading
           title="导入题库"
-          subtitle="CSV 可自定义列名并进行映射；JSON 使用标准题目结构。任何一行有误，整批都不会写入。"
-          action={<button className="btn btn-small" onClick={downloadTemplate}><Download size={14} />CSV 空模板</button>}
+          subtitle="Excel 和 Word 表格可直接读取，选择工作表或表格后匹配字段；预览确认后再保存。"
+          action={<div className="setup-heading-actions"><select className="input" aria-label="题库模板格式" value={templateFormat} onChange={event => setTemplateFormat(event.target.value as typeof templateFormat)}><option value="xlsx">Excel 模板</option><option value="docx">Word 模板</option><option value="csv">CSV 模板</option></select><button className="btn btn-small" disabled={fileActionBusy} onClick={() => void downloadQuestionFile(true)}><Download size={14} />下载模板</button></div>}
         />
         <div className="setup-upload-body">
-          <input type="file" ref={fileInput} accept=".csv,.json,text/csv,application/json" hidden onChange={readImportFile} />
+          <input type="file" ref={fileInput} accept=".xlsx,.docx,.csv,.json" hidden onChange={readImportFile} />
           <button className="setup-upload-button" disabled={importDisabled} onClick={() => fileInput.current?.click()}>
             <span><Upload size={20} /></span>
-            <strong>{readingFile ? '正在读取文件…' : filename ? '重新选择题库文件' : '选择 CSV 或 JSON 文件'}</strong>
+            <strong>{readingFile ? '正在读取文件…' : filename ? '重新选择题库文件' : '选择 Excel、Word、CSV 或 JSON'}</strong>
             <small>{locked ? '已分发或开始评测，题库已锁定' : '在本地解析文件，预览确认后才保存 · 最大 20 MB'}</small>
           </button>
 
-          {filename && <div className="setup-selected-file"><FileSpreadsheet size={15} /><strong>{filename}</strong><button className="setup-icon-button" disabled={saving} aria-label="取消本次导入" onClick={() => { setFilename(''); setCsvSource(null); setJsonQuestions(null); setImportError(''); }}><X size={14} /></button></div>}
+          {filename && <div className="setup-selected-file"><FileSpreadsheet size={15} /><strong>{filename}</strong><button className="setup-icon-button" disabled={saving || readingFile} aria-label="取消本次导入" onClick={() => { setFilename(''); setCsvSource(null); setOfficeTables([]); setJsonQuestions(null); setImportError(''); }}><X size={14} /></button></div>}
           {importError && <div className="setup-error" role="alert"><AlertCircle size={16} />{importError}</div>}
 
+          {officeTables.length > 0 && <div className="setup-office-source"><label className="field">选择工作表或题目表格<select className="input" value={officeTableIndex} onChange={event => { const index = Number(event.target.value); setOfficeTableIndex(index); setCsvSource(officeTables[index]); setMapping(defaultMapping(officeTables[index].headers)); }} disabled={importDisabled}>{officeTables.map((table, index) => <option key={index} value={index}>{table.name} · {table.rows.length} 行</option>)}</select></label><p>Word 需每行一道题，列名参照模板。文档内嵌图片不随题库导入，请在“批量导图”关联实际文件。</p></div>}
           {csvSource && <div className="setup-mapping">
             <h3>匹配题目字段</h3>
             <p>标记 * 的字段必填；未映射的源列会作为自定义字段保留。</p>
@@ -549,13 +571,14 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
         <PanelHeading
           title="项目题库"
           subtitle="题号保持唯一；题目、需求与验收点随本次项目保存，不混入演示题。"
-          action={<div className="setup-heading-actions"><button className="btn btn-small" onClick={() => { downloadText('当前项目题库.json', JSON.stringify(draft.questions, null, 2), 'application/json;charset=utf-8'); onToast(`已生成当前 ${draft.questions.length} 道题的 JSON 文件`); }}><Download size={14} />导出 JSON</button><button className="btn btn-primary btn-small" disabled={locked || saving} onClick={() => openQuestion()}><Plus size={14} />手工新增</button></div>}
+          action={<div className="setup-heading-actions"><select className="input" aria-label="题库导出格式" value={questionExportFormat} onChange={event => setQuestionExportFormat(event.target.value as typeof questionExportFormat)}><option value="xlsx">Excel 题库</option><option value="docx">Word 题库</option><option value="json">JSON 题库</option></select><button className="btn btn-small" disabled={fileActionBusy} onClick={() => void downloadQuestionFile(false)}><Download size={14} />导出题库</button><button className="btn btn-primary btn-small" disabled={locked || saving} onClick={() => openQuestion()}><Plus size={14} />手工新增</button></div>}
         />
+        {questionExportFormat === 'docx' && <p className="setup-empty-note">Word 题库保留八个标准字段；有自定义字段时，请使用 Excel 或 JSON 保留完整内容。</p>}
         <div className="setup-list-toolbar"><label className="setup-search"><Search size={15} /><input placeholder="搜索题号、标题或需求" value={questionSearch} onChange={event => setQuestionSearch(event.target.value)} /></label><span>{visibleQuestions.length} 道题</span></div>
         <div className="setup-table-scroll"><table className="setup-table"><thead><tr><th>题号 / 标题</th><th>场景</th><th>品类 / 难度</th><th>验收与参考图</th><th>操作</th></tr></thead><tbody>
           {visibleQuestions.map(question => <tr key={question.id}><td><code>{question.id}</code><strong>{question.title}</strong><p>{question.request}</p></td><td>{question.scene || '未填写'}</td><td>{question.category || '未填写'}<small>{question.difficulty || '未填写'}</small></td><td>{question.acceptance.length} 项验收<small>{question.referenceNames.length ? `${question.referenceNames.length} 个文件名 · 待匹配上传` : '无参考图引用'}</small></td><td><div className="setup-row-actions"><button className="setup-icon-button" aria-label={`编辑题目 ${question.id}`} disabled={locked || saving} onClick={() => openQuestion(question)}><Pencil size={14} /></button><button className="setup-icon-button" aria-label={`删除题目 ${question.id}`} disabled={locked || saving} onClick={() => deleteQuestion(question)}><Trash2 size={14} /></button></div></td></tr>)}
         </tbody></table></div>
-        {!visibleQuestions.length && <div className="setup-empty"><FileSpreadsheet size={25} /><strong>{draft.questions.length ? '没有匹配的题目' : '题库还是空的'}</strong><span>{draft.questions.length ? '试试其他关键词。' : '导入 CSV / JSON，或手工新增第一道题。'}</span></div>}
+        {!visibleQuestions.length && <div className="setup-empty"><FileSpreadsheet size={25} /><strong>{draft.questions.length ? '没有匹配的题目' : '题库还是空的'}</strong><span>{draft.questions.length ? '试试其他关键词。' : '导入 Excel / Word 表格，也可使用 CSV / JSON，或手工新增第一道题。'}</span></div>}
       </section>
 
       {draft.questions.length > 0 && <section className="setup-distributions">

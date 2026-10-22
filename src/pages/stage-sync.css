@@ -186,3 +186,4 @@
   .stage-receipt-body .stage-counts > div { padding: 10px 7px; }
   .stage-receipt-body .stage-counts span { font-size: 8px; }
 }
+.stage-handoff-download{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:18px 24px;padding:22px;border:1px solid #dcd5f3;border-radius:12px;background:#f8f6ff}.stage-handoff-download strong{font-size:15px;color:#5c4c7c}.stage-handoff-download p{font-size:12px;color:#8b7e9b;line-height:1.8;margin:8px 0 0}.stage-handoff-download .btn{flex-shrink:0}.stage-original-files{margin:18px 24px;font-size:12px;color:#8f839d}.stage-original-files>summary{cursor:pointer;padding:12px 0}.quality-panel>.stage-original-files{margin:18px 0}.archive-panel>.btn-primary{margin-bottom:20px}@media(max-width:800px){.stage-handoff-download{flex-direction:column;align-items:stretch;margin:16px}.stage-handoff-download .btn{justify-content:center}}

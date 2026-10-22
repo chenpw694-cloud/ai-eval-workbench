@@ -172,6 +172,7 @@
 .setup-import-footer { display: flex; align-items: center; gap: 20px; justify-content: space-between; border-top: 1px solid #eee7f5; padding-top: 17px; }
 .setup-import-footer > span { font-size: 10px; color: #b8a0c6; line-height: 1.8; }
 .setup-heading-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.setup-heading-actions>.input{width:auto;min-width:120px;padding:8px 12px;font-size:12px}.setup-office-source{padding:16px;margin:16px 0;background:#faf8ff;border:1px solid #e7e1f4;border-radius:10px}.setup-office-source .field{display:flex;flex-direction:column;gap:10px;max-width:420px;font-size:13px}.setup-office-source p{font-size:12px;color:#8d829c;line-height:1.8}
 .setup-list-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 23px 18px; gap: 15px; }
 .setup-list-toolbar > span { font-size: 10px; color: #b5a1c1; }
 .setup-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e7dfef; border-radius: 6px; padding: 8px 10px; color: #b29bc5; min-width: 270px; }

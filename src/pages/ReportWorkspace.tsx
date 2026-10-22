@@ -1,7 +1,8 @@
 import { isAnchorMode } from '../core/ratings';
 import { useEffect, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, Check, CheckCircle2, ClipboardCheck, FileText, PencilLine, ShieldCheck } from 'lucide-react';
-import type { ProjectBundle } from '../core/model';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, FileSpreadsheet, FileText, PencilLine, ShieldCheck } from 'lucide-react';
+import { getAsset } from '../storage/projects';
+import type { Asset, ProjectBundle } from '../core/model';
 import type { QualityState } from '../core/quality';
 import { emptyQuality } from '../core/quality';
 import { buildReport, reportMarkdown } from '../core/report';
@@ -13,7 +14,7 @@ import { downloadJson } from '../storage/local';
 import { useDirty } from './QualityWorkspace';
 import './report-workspace.css';
 
-export default function ReportWorkspace({ bundle, onSave, onToast, demo = false }: { bundle: ProjectBundle; onSave: (state: QualityState) => Promise<void>; onToast: (message: string) => void; demo?: boolean }) {
+export default function ReportWorkspace({ bundle, onSave, onToast, demo = false, loader = getAsset }: { bundle: ProjectBundle; onSave: (state: QualityState) => Promise<void>; onToast: (message: string) => void; demo?: boolean; loader?: (id: string) => Promise<Asset | undefined> }) {
   const saved = latestReportNotes(bundle.quality?.reportNotes);
   const [draft, setDraft] = useState(saved ?? emptyReportNotes());
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false);
@@ -42,14 +43,26 @@ export default function ReportWorkspace({ bundle, onSave, onToast, demo = false 
       setDirty(false); onToast('报告结论已保存为新修订');
     } catch(error) { onToast(error instanceof Error ? error.message : '保存失败'); } finally { setBusy(false); }
   }
-  function exportReport(format: 'md' | 'json') {
+  async function exportReport(format: 'md' | 'json' | 'word' | 'xlsx') {
+    if (dirty || busy) return;
     const name = `${demo ? '界面演示-' : ''}${bundle.project.name.replace(/[\\/:*?"<>|]/g, '_')}-报告草稿`;
-    if (format === 'json') downloadJson(`${name}.json`, report);
-    else { const url = URL.createObjectURL(new Blob([reportMarkdown(report)], {type:'text/markdown;charset=utf-8'})); const a = document.createElement('a'); a.href = url; a.download = `${name}.md`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000); }
-    onToast(`${demo ? '演示' : ''}报告草稿已导出；原图请另保存汇总主包`);
+    setBusy(true);
+    try {
+      if (format === 'json') downloadJson(`${name}.json`, report);
+      else {
+        const file = format === 'word' ? await (await import('../core/wordReport')).reportWord(bundle, basis, loader, report.generatedAt)
+          : format === 'xlsx' ? await (await import('../core/readableWorkbook')).readableWorkbook(bundle, basis, report.generatedAt)
+          : new Blob([reportMarkdown(report)], {type:'text/markdown;charset=utf-8'});
+        const url = URL.createObjectURL(file), a = document.createElement('a'); a.href = url;
+        a.download = `${name}.${format === 'word' ? 'docx' : format}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }
+      onToast(`${format === 'word' ? 'Word 报告' : format === 'xlsx' ? 'Excel 明细' : '报告草稿'}已导出；完整项目与原图请另保存团队交接包`);
+    } catch (error) { onToast(error instanceof Error ? error.message : '导出失败，请重试'); } finally { setBusy(false); }
   }
+
   return <>
-    <PageHeading eyebrow="INSIGHTS & DELIVERABLES" title="把评测证据，整理成结论" description="分别汇集各竞品相对自家的评分、GSB 与质量记录，不要求竞品之间联合排名。" action={<><button className="btn" disabled={dirty || busy} onClick={() => exportReport('json')}><ArrowDownToLine size={15}/>JSON 明细</button><button className="btn btn-primary" disabled={dirty || busy} onClick={() => exportReport('md')}><FileText size={15}/>导出报告草稿</button></>}/>
+    <PageHeading eyebrow="INSIGHTS & DELIVERABLES" title="把评测证据，整理成结论" description="分别汇集各竞品相对自家的评分、GSB 与质量记录，不要求竞品之间联合排名。" action={<div className="report-export-actions"><button className="btn" disabled={dirty || busy} onClick={() => void exportReport('xlsx')}><FileSpreadsheet size={15}/>Excel 明细</button><button className="btn btn-primary" disabled={dirty || busy} onClick={() => void exportReport('word')}><FileText size={15}/>{busy ? '正在生成…' : 'Word 报告'}</button><details className="report-extra-formats"><summary>其他格式</summary><button className="btn btn-small" disabled={dirty || busy} onClick={() => void exportReport('md')}>Markdown</button><button className="btn btn-small" disabled={dirty || busy} onClick={() => void exportReport('json')}>JSON 明细</button></details></div>}/>
+    <div className="report-export-guide"><strong>交作业用 Word，核对数据用 Excel</strong><span>Word 包含结论、评分表、GSB 与典型案例图；Excel 包含评分明细和可再次导入的题库。跨电脑继续评测，请使用“阶段同步”的团队交接 ZIP。</span></div>
     <div className="report-status-banner"><span className="report-status-icon"><ClipboardCheck size={24}/></span><div><strong>{demo ? '界面演示 · 草稿' : '报告草稿 · 待人工审阅'}</strong><p>{passed}/{report.checks.length} 项检查通过。原图需另存主包，本页不会把项目标为已归档。</p></div><button className="btn btn-small" onClick={() => setTab('checks')}>查看缺口<AlertCircle size={14}/></button></div>
     <div className="report-toolbar"><div className="report-tabs" role="tablist" aria-label="报告工作区"><button role="tab" aria-selected={tab === 'preview'} onClick={() => setTab('preview')}><FileText size={15}/>报告预览</button><button role="tab" aria-selected={tab === 'write'} onClick={() => setTab('write')}><PencilLine size={15}/>撰写结论{dirty && ' · 未保存'}</button><button role="tab" aria-selected={tab === 'checks'} onClick={() => setTab('checks')}><ShieldCheck size={15}/>交付前检查</button></div><label>统计口径<select className="input" aria-label="报告统计口径" value={basis} onChange={event => setBasis(event.target.value as ReportBasis)}><option value="original">原始初评</option><option value="adjudicated-reference">裁决口径参考分</option></select></label></div>
     {tab === 'preview' && <>

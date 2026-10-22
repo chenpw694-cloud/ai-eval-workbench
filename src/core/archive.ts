@@ -7,6 +7,7 @@ import type { RatingValidationOptions } from './ratings.ts';
 import { canonicalJoint } from './joint.ts';
 import { latestEvaluations, validateEvaluation, validateProject } from './assessment.ts';
 import { latestQuality, validateQuality } from './quality.ts';
+import { unpackHandoff } from './handoff.ts';
 
 export type ArchiveMode = 'checkpoint' | 'final';
 export type ArchiveInput = { mode: ArchiveMode; basis: ReportBasis; operatorId: string; reason: string; scopeConfirmed: boolean; conclusionsConfirmed: boolean; featuresConfirmed: boolean; demo: boolean };
@@ -121,6 +122,7 @@ export async function buildFinalArchive(source: ArchiveSource, input: ArchiveInp
 
 /** Read-only verification. Never writes into a working project. */
 export async function readFinalArchive(files: File[]): Promise<{record:ArchiveRecord;bundle:ProjectBundle;report:ReturnType<typeof archiveReport>;blobs:Map<string,Blob>}> {
+  files=await unpackHandoff(files);
   if(!files.length||files.length>260||new Set(files.map(f=>f.name)).size!==files.length)throw new Error('归档文件缺失、重名或数量超过上限');
   const headers=files.filter(f=>f.name.endsWith('.archive.json'));
   if(headers.length!==1||headers[0].size>MiB)throw new Error('请选择一份归档清单与它的全部报告、项目清单和 ZIP');
