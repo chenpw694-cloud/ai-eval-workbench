@@ -72,12 +72,32 @@
 .bulk-success > div { flex: 1; min-width: 200px; }
 .bulk-success h2 { font-size: 15px; font-weight: 550; color: #809f8e; margin: 0 0 9px; }
 .bulk-success p { font-size: 11px; line-height: 1.9; color: #9dab9f; margin: 3px 0; }
+.bulk-labels { padding: 23px; }
+.bulk-label-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.bulk-label-list { max-height: 300px; overflow-y: auto; border: 1px solid #ece5f4; border-radius: 8px; }
+.bulk-label-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid #f0eaf6; }
+.bulk-label-row:last-child { border-bottom: 0; }
+.bulk-label-row > span { width: 150px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #8b7c99; }
+.bulk-label-row > input { flex: 1; width: 100px; }
+.bulk-label-row > small { font-size: 10px; color: #a896ba; white-space: nowrap; }
+.bulk-file .bulk-match-reason { margin: 0; color: #9e87b8; font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.bulk-mapping, .bulk-confirm, .bulk-notice[role="alert"] { scroll-margin: 20px 0 160px; }
+.bulk-footer .bulk-footer-status { min-width: 0; flex: 1 1 310px; }
+.bulk-footer-status > span { min-width: 0; line-height: 1.7; }
+.bulk-footer-status small { display: block; font-size: 10px; color: #aa9ab7; overflow-wrap: anywhere; }
+.bulk-footer-status > svg { flex-shrink: 0; }
+.bulk-footer-status > .bulk-text-button { flex-shrink: 0; margin-left: auto; }
+.bulk-footer.ready { border-color: #d8e9df; }
+.bulk-footer.ready .bulk-footer-status { color: #709a83; }
 @media (max-width: 750px) {
-  .bulk-source, .bulk-mapping, .bulk-confirm { padding: 16px; }
+  .bulk-source, .bulk-mapping, .bulk-confirm, .bulk-labels { padding: 16px; }
   .bulk-settings { flex-direction: column; }
   .bulk-settings > label { min-width: 0; }
   .bulk-summary { grid-template-columns: repeat(2, 1fr); }
   .bulk-footer { bottom: 8px; padding: 14px; gap: 10px; }
   .bulk-footer > div { flex-basis: 100%; }
   .bulk-footer > button { flex: 1; }
+  .bulk-label-row { flex-wrap: wrap; gap: 8px; }
+  .bulk-label-row > span { width: calc(100% - 64px); }
+  .bulk-label-row > input { flex-basis: calc(100% - 70px); }
 }
