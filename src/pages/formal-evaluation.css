@@ -147,7 +147,10 @@
 .formal-reference-history-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .formal-reference-history-row small { color: #b2a7bc; margin-left: 6px; }
 .formal-reference-history-row button { flex-shrink: 0; min-height: 32px; border: 1px solid #e8e3f0; padding: 5px 8px; border-radius: 5px; color: #8d7a9e; background: #fff; font-size: 10px; }
-.formal-image-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 15px; border-bottom: 1px solid #f0f1f5; }
+.formal-image-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 15px; border-bottom: 1px solid #f0f1f5; }
+.formal-image-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.formal-page .formal-bulk-entry { background: #f6f2ff; border-color: #dfd4f2; color: #8162a9; }
+.formal-page .formal-bulk-entry:hover { background: #eee6fc; border-color: #c9b7e3; }
 .formal-image-heading h3 { display: flex; align-items: center; gap: 6px; color: #787d93; font-size: 12px; }
 .formal-image-heading small { font-size: 9px; color: #aaadbb; font-weight: 400; }
 .formal-main-image { width: calc(100% - 28px); height: 308px; margin: 14px 14px 0; border: 0; border-radius: 7px; overflow: hidden; padding: 0; background: #f3f2f7; position: relative; display: flex; align-items: center; justify-content: center; cursor: zoom-in; }

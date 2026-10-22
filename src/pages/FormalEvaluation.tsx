@@ -4,7 +4,7 @@ import { isAnchorMode, questionDimensions } from '../core/ratings';
 import { resolveReferences } from '../core/references';
 import type { DimensionRatings } from '../core/model';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, Image as ImageIcon, Info, Maximize2, Minimize2, PanelLeft, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Flag, FolderOpen, Image as ImageIcon, Info, Maximize2, Minimize2, PanelLeft, Save, Search, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import type { Asset, AssetMetadata, Evaluation, MediaCheck, ProjectBundle, TagAssignment } from '../core/model';
 import type { Severity } from '../core/scoring';
 import { dimensionScore } from '../core/scoring';
@@ -450,7 +450,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         <button className="formal-toolbar-icon" disabled={position >= project.questions.length - 1 || locked} onClick={() => navigate(project.questions[position + 1].id)} aria-label="下一道评测题" title="下一题"><ChevronRight size={16}/></button>
       </div>}
       <div className="formal-toolbar-actions">
-        {onBulkImport && !focusMode && <button className="btn btn-small" disabled={loading || busy} onClick={onBulkImport}><Upload size={14}/>批量导图</button>}
+        {onBulkImport && <button className="btn btn-small formal-bulk-entry" disabled={locked} onClick={onBulkImport} title="批量导入参考图或生成图；离开前请先保存当前草稿"><FolderOpen size={14}/>批量导图</button>}
         <button className="formal-toolbar-icon" aria-label="评测操作说明" title="评测操作说明" aria-expanded={instructionsOpen} aria-controls="formal-evaluation-instructions" onClick={() => setInstructionsOpen(previous => !previous)}><Info size={16}/></button>
         {onFocusChange && <button className={`btn btn-small formal-focus-toggle${focusMode ? ' active' : ''}`} onClick={() => onFocusChange(!focusMode)} aria-pressed={focusMode} title={focusMode ? '退出专注评测（Esc）' : '收起导航，扩大图片与评分区域'}>{focusMode ? <Minimize2 size={14}/> : <Maximize2 size={14}/>}<span>{focusMode ? '退出专注' : '专注评测'}</span></button>}
       </div>
@@ -508,7 +508,7 @@ export default function FormalEvaluation({ bundle, onSave, onToast, initialQuest
         </details>
 
         <div className="panel formal-results">
-          <div className="formal-image-heading"><h3><ImageIcon size={16} />生成结果 <small>{outputs.length} 张原图</small></h3><button className="btn btn-small" disabled={locked} onClick={() => outputInput.current?.click()}><Upload size={14} />上传全部原图</button><input ref={outputInput} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => void upload(event.target.files, 'output')} /></div>
+          <div className="formal-image-heading"><h3><ImageIcon size={16} />生成结果 <small>{outputs.length} 张原图</small></h3><div className="formal-image-actions">{onBulkImport && <button className="btn btn-small formal-bulk-entry" disabled={locked} onClick={onBulkImport} title="批量导入参考图或生成图；离开前请先保存当前草稿"><FolderOpen size={14}/>批量导图</button>}<button className="btn btn-small" disabled={locked} onClick={() => outputInput.current?.click()}><Upload size={14} />上传全部原图</button></div><input ref={outputInput} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => void upload(event.target.files, 'output')} /></div>
           <button className={`formal-main-image ${activeImage ? '' : 'empty'}`} onClick={() => activeImage && showImage(activeImage)} disabled={!activeImage} aria-label="放大查看原图">
             {activeImage ? <><img src={assetUrl(activeImage)} alt={activeImage.name} /><span className="formal-source">原始文件 · 未压缩</span><span className="formal-zoom"><Maximize2 size={16} /></span></> : <span><ImageIcon size={36} />{loading ? '正在读取原图…' : '上传本次生成的全部图片'}<small>PNG、JPEG、WebP、GIF · 单张 ≤ 25 MB · 每批 ≤ 12 张</small></span>}
           </button>
