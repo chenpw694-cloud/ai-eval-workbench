@@ -271,8 +271,8 @@ test('project identity and hashes are checked beyond the project display name an
     bundle => { bundle.project.schemeHash = 'another-hash'; },
     bundle => { bundle.project.questionsHash = 'another-hash'; },
     bundle => { bundle.project.members[0].id = 'changed'; },
-    bundle => { bundle.project.products[0].version = 'v2'; },
-    bundle => { bundle.project.products[0].ownerId = 'm2'; },
+    bundle => { bundle.project.products[0].id = 'another-product'; },
+    bundle => { bundle.project.products[0].demo = true; },
     bundle => { bundle.project.questions[0].request = 'changed'; },
     bundle => { bundle.project.expectedQuestionCount = 50; },
     bundle => { bundle.project.rulesConfirmed = false; },
@@ -449,4 +449,19 @@ test('planning and materializing are pure; returned data cannot mutate inputs or
   assert.deepEqual(local, localBefore);
   assert.deepEqual(packet, packetBefore);
   assert.deepEqual(plan, planBefore);
+});
+
+test('old product names, roles and ownership in a submission do not overwrite locally corrected information', () => {
+  const incoming = emptyBundle();
+  const submitted = evaluation(incoming);
+  const local = emptyBundle();
+  Object.assign(local.project.products[0], {name:'更正后的名称', version:'实际会员档位', role:'benchmark', ownerId:'m2'});
+  const original = clone(local);
+  const plan = planMerge(local, submission(incoming, 'p1'));
+  assert.deepEqual(plan.blockers, []);
+  const merged = apply(plan);
+  assert.deepEqual(merged.project.products, local.project.products);
+  assert.deepEqual(merged.evaluations, [submitted]);
+  assert.equal(merged.evaluations[0].reviewerId, 'm1');
+  assert.deepEqual(local, original);
 });

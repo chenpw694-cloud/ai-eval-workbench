@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { Member, Product, ProductRole, Project, Question, Scheme } from '../core/model.ts';
 import { parseCsv, parseQuestionsJson, questionsFromRows } from '../core/questions.ts';
+import { productInfoCorrectionErrors } from '../core/projectEditing';
 import { PageHeading, PanelHeading, Pill } from '../ui';
 import './project-setup.css';
 
@@ -218,6 +219,10 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
       return '计划题量须为大于 0 的整数。';
     }
     if (next.members.some(member => !member.name.trim())) return '请填写每位成员的姓名，或删除尚未使用的空白成员。';
+    if (locked) {
+      const correctionErrors = productInfoCorrectionErrors(project, next);
+      if (correctionErrors.length) return correctionErrors[0];
+    }
     const total = next.scheme.dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);
     if (Math.abs(total - 100) >= .001 || next.scheme.dimensions.some(dimension => !Number.isFinite(dimension.weight) || dimension.weight < 0 || dimension.weight > 100)) {
       return '维度权重须在 0–100% 之间，且合计为 100%。';
@@ -375,12 +380,12 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
     <div className="setup-status-bar">
       <span><FileJson size={15} />{draft.scheme.name} <code>v{draft.scheme.version}</code></span>
       <Pill tone={locked ? 'orange' : dirty ? 'violet' : 'green'}>
-        {locked ? dirty ? '有未保存修改 · 评测口径锁定' : '评测口径锁定 · 姓名可更正' : dirty ? '有未保存修改' : '本地项目快照'}
+        {locked ? dirty ? '有未保存修改 · 题库和规则锁定' : '题库和规则锁定 · 基本信息可修改' : dirty ? '有未保存修改' : '本地项目快照'}
       </Pill>
     </div>
 
     {locked && <Notice tone="warning">
-      <strong>已分发或开始评测，评测口径已锁定。</strong> 可修改项目名称、背景、周期和成员姓名；成员 ID 与增删、产品负责人、题目、权重及评分政策保持当前快照。{project.status === 'draft' && <> 尚未分发的项目，允许补填原本空白的产品名称或版本；已填写的产品身份保持锁定。</>}
+      <strong>已分发或开始评测，题库和评分规则已锁定。</strong> 项目信息、成员姓名、产品名称、版本、竞品角色和负责人仍可修改，保存后也可再次更正。成员及产品 ID、增删范围、真实/模拟属性保持固定；更正会保留历史快照与已有评分。
       <div className="formal-locked-restart"><span>需要重新导入题库？保留旧项目，创建一份可编辑的新草稿。</span><button className="btn btn-small" disabled={saving} onClick={onRestart}><RotateCcw size={14}/>重新开始</button></div>
     </Notice>}
 
@@ -422,7 +427,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
       <section className="panel setup-section">
         <PanelHeading
           title="评测成员"
-          subtitle={locked ? '已开始评测，仍可更正姓名。成员 ID 与已有评分、产品分工保持关联；增删成员已锁定。' : '成员 ID 保持稳定，产品负责人通过 ID 关联；分工是本地流程信息，不是登录权限。'}
+          subtitle={locked ? '已开始评测，仍可更正姓名。成员 ID 与历史署名保持关联；增删成员已锁定。' : '成员 ID 保持稳定，产品负责人通过 ID 关联；分工是本地流程信息，不是登录权限。'}
           action={<button className="btn btn-small" disabled={locked || saving} onClick={() => updateProject('members', [...draft.members, { id: `member_${crypto.randomUUID()}`, name: '' }])}><Plus size={14} />添加成员</button>}
         />
         <div className="setup-members">
@@ -440,13 +445,13 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
           })}
           {!draft.members.length && <div className="setup-empty">还没有成员。添加成员后可以分配产品负责人。</div>}
         </div>
-        {locked && <div className="setup-member-save"><span>更正姓名后保存配置，无需重新开始评测。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '姓名与配置已保存，已有评分和成员关联保持不变')}><Save size={14}/>{saving ? '保存中…' : '保存配置'}</button></div>}
+        {locked && <div className="setup-member-save"><span>更正姓名后保存配置，无需重新开始评测。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '姓名与配置已保存，已有评分记录保留')}><Save size={14}/>{saving ? '保存中…' : '保存配置'}</button></div>}
       </section>
 
       <section className="setup-products-section">
         <PanelHeading
           title="被测产品与负责人"
-          subtitle="产品名称和版本请按实际填写；模拟产品单独标记，不进入真实产品汇总。"
+          subtitle={locked ? '名称、版本、竞品角色和负责人保存后仍可更正。产品 ID 不变，历史评分和原评测员署名保留。' : '产品名称和版本请按实际填写；模拟产品单独标记，不进入真实产品汇总。'}
           action={<button className="btn btn-small" disabled={locked || saving} onClick={addProduct}><Plus size={14} />添加产品</button>}
         />
         <div className="setup-products-grid">
@@ -459,18 +464,18 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
             </div>
             <div className="setup-form-grid">
               <label className="setup-field">产品名称
-                <input value={product.name} placeholder="填写实际产品名称" disabled={saving || (locked && !(project.status === 'draft' && !project.products.find(item => item.id === product.id)?.name.trim()))} onChange={event => updateProduct(product.id, { name: event.target.value })} />
+                <input value={product.name} placeholder="填写实际产品名称" disabled={saving} onChange={event => updateProduct(product.id, { name: event.target.value })} />
               </label>
               <label className="setup-field">版本 / 会员档位
-                <input value={product.version} placeholder="例如：Web 版 / 专业会员" disabled={saving || (locked && !(project.status === 'draft' && !project.products.find(item => item.id === product.id)?.version.trim()))} onChange={event => updateProduct(product.id, { version: event.target.value })} />
+                <input value={product.version} placeholder="例如：Web 版 / 专业会员" disabled={saving} onChange={event => updateProduct(product.id, { version: event.target.value })} />
               </label>
               <label className="setup-field">竞品角色
-                <select value={product.role} disabled={locked || saving} onChange={event => updateProduct(product.id, { role: event.target.value as ProductRole })}>
+                <select value={product.role} disabled={saving} onChange={event => updateProduct(product.id, { role: event.target.value as ProductRole })}>
                   {Object.entries(roleLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                 </select>
               </label>
               <label className="setup-field">产品负责人
-                <select value={product.ownerId} disabled={locked || saving} onChange={event => updateProduct(product.id, { ownerId: event.target.value })}>
+                <select value={product.ownerId} disabled={saving} onChange={event => updateProduct(product.id, { ownerId: event.target.value })}>
                   <option value="">请选择成员</option>
                   {draft.members.map(member => <option value={member.id} key={member.id}>{member.name || '未命名成员'}</option>)}
                 </select>
@@ -483,7 +488,7 @@ export default function ProjectSetup({ project, locked, onSave, onToast, onResta
         </div>
       </section>
       {pendingProducts.length > 0 && <Notice tone="warning">有 {pendingProducts.length} 个真实产品尚未填齐名称、版本或负责人。已配置好的产品可先逐题评测；团队分发、质检和最终汇总前须补齐全部产品。尚未使用的产品可在开始评测前删除。</Notice>}
-      <div className="setup-footer"><span>保存的是当前浏览器中的项目快照，仓库方案文件不会自动修改。</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '项目信息与产品分工已保存')}><Save size={14} />保存配置</button></div>
+      <div className="setup-footer"><span>{locked ? '基本信息保存后仍可继续修改；旧快照、评分与原署名保留。' : '保存的是当前浏览器中的项目快照，仓库方案文件不会自动修改。'}</span><button className="btn btn-primary" disabled={saving || !dirty} onClick={() => persist(draft, '项目信息与产品分工已保存')}><Save size={14} />保存配置</button></div>
     </>}
 
     {tab === 'questions' && <>

@@ -6,7 +6,7 @@ import { validateReferenceHistory } from '../core/references';
 import { prepareReferenceSave } from './referenceSave';
 import type { ReferenceChange } from './referenceSave';
 export type { ReferenceChange } from './referenceSave';
-import { frozenConfigurationMatches } from '../core/projectEditing';
+import { frozenConfigurationMatches, productInfoCorrectionErrors } from '../core/projectEditing';
 import { PROJECT_TRASH_STORE, PROJECT_TRASH_MESSAGE } from './projectAccess';
 
 const DATABASE = 'eval-studio-formal-projects';
@@ -121,8 +121,10 @@ export async function saveProject(input: Project): Promise<Project> {
       evaluations.onsuccess = () => {
         const records = evaluations.result as Evaluation[];
         if (existing && (existing.status === 'active' || records.some(record => record.status === 'submitted'))) {
+          const correctionErrors = productInfoCorrectionErrors(existing, input);
+          if (correctionErrors.length) { failure = new Error(correctionErrors[0]); transaction.abort(); return; }
           if (!frozenConfigurationMatches(existing, input)) {
-            failure = new Error('项目已开始或分发，题库、成员 ID 与范围、产品身份和评分规则已冻结；成员姓名可更正，未分发项目还可补齐原空白产品名称和版本');
+            failure = new Error('项目已开始或分发，成员和产品 ID、增删范围、真实/模拟属性、题库和评分规则已冻结；姓名、产品名称、版本、竞品角色和负责人可更正');
             transaction.abort(); return;
           }
         }

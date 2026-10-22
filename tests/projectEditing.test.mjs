@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { frozenConfigurationMatches } from '../src/core/projectEditing.ts';
+import { frozenConfigurationMatches, productInfoCorrectionErrors } from '../src/core/projectEditing.ts';
 import { fixture } from './helpers/formal-fixture.mjs';
 
 function setup(status = 'draft') {
@@ -20,18 +20,20 @@ test('submitted but undistributed projects can complete original blank product l
   assert.equal(previous.products[1].version, '  ');
 });
 
-test('the completion allowance cannot replace or clear already filled product names or versions', () => {
-  const previous = setup();
-  for (const [field, value] of [['name', '另一个产品'], ['name', ''], ['version', 'v99'], ['version', '']]) {
-    const next = structuredClone(previous);
-    next.products[0][field] = value;
-    assert.equal(frozenConfigurationMatches(previous, next), false, `${field} -> ${value}`);
+test('product names and versions can be corrected repeatedly after submission or activation', () => {
+  for (const status of ['draft', 'active']) {
+    const previous = setup(status), next = structuredClone(previous);
+    next.products[0].name = '更正后的产品'; next.products[0].version = '实际会员档位';
+    assert.equal(frozenConfigurationMatches(previous, next), true);
+    const again = structuredClone(next);
+    again.products[0].name = '再次更正的名称'; again.products[0].version = '网页免费版';
+    assert.equal(frozenConfigurationMatches(next, again), true);
+    for (const field of ['name', 'version']) {
+      const cleared = structuredClone(next); cleared.products[0][field] = '';
+      assert.equal(frozenConfigurationMatches(previous, cleared), false);
+      assert.match(productInfoCorrectionErrors(previous, cleared).join(), /不可清空/);
+    }
   }
-  const completed = structuredClone(previous);
-  completed.products[1].name = '已补齐名称';
-  const replacement = structuredClone(completed);
-  replacement.products[1].name = '改成其他名称';
-  assert.equal(frozenConfigurationMatches(completed, replacement), false);
 });
 
 test('blank label repairs must be meaningful, not another blank or whitespace value', () => {
@@ -44,12 +46,10 @@ test('blank label repairs must be meaningful, not another blank or whitespace va
   assert.equal(frozenConfigurationMatches(previous, structuredClone(previous)), true);
 });
 
-test('repairing a label does not unlock product ownership, scope, membership or scoring rules', () => {
+test('correcting product information does not unlock IDs, real/demo scope, membership or scoring rules', () => {
   const previous = setup();
   const changes = [
     next => { next.products[1].id = 'replacement-id'; },
-    next => { next.products[1].ownerId = previous.members[0].id; },
-    next => { next.products[1].role = 'self'; },
     next => { next.products[1].demo = !next.products[1].demo; },
     next => { next.products.pop(); },
     next => { next.members[0].id = 'replacement-member'; },
@@ -85,12 +85,12 @@ test('frozen projects allow nonempty member name corrections while IDs and assig
   }
 });
 
-test('active projects cannot complete blank labels or downgrade their status to bypass the team freeze', () => {
+test('active projects can complete blank labels but cannot downgrade their frozen status', () => {
   const previous = setup('active');
   for (const field of ['name', 'version']) {
     const next = structuredClone(previous);
     next.products[1][field] = '补齐';
-    assert.equal(frozenConfigurationMatches(previous, next), false);
+    assert.equal(frozenConfigurationMatches(previous, next), true);
   }
   const downgraded = { ...structuredClone(previous), status: 'draft' };
   assert.equal(frozenConfigurationMatches(previous, downgraded), false);
@@ -116,4 +116,18 @@ test('undistributed product labels may be completed while transitioning to a fro
   next.products[1].version = 'Web';
   next.status = 'active';
   assert.equal(frozenConfigurationMatches(previous, next), true);
+});
+
+test('product role and owner corrections require a valid role and an existing member', () => {
+  for (const status of ['draft', 'active']) {
+    const previous = setup(status), next = structuredClone(previous);
+    next.products[0].role = 'benchmark'; next.products[0].ownerId = previous.members[1].id;
+    assert.equal(frozenConfigurationMatches(previous, next), true);
+    assert.equal(next.products[0].id, previous.products[0].id);
+    for (const [field, value] of [['ownerId', 'foreign-member'], ['ownerId', ''], ['role', 'unknown']]) {
+      const invalid = structuredClone(next); invalid.products[0][field] = value;
+      assert.equal(frozenConfigurationMatches(previous, invalid), false);
+      assert.ok(productInfoCorrectionErrors(previous, invalid).length);
+    }
+  }
 });
