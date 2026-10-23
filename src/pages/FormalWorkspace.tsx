@@ -1,9 +1,9 @@
 import AnchorRatings from '../components/AnchorRatings';
-import { isAnchorMode, ratingErrors } from '../core/ratings';
+import { isAnchorMode } from '../core/ratings';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Download, FileCheck2, Columns2, FolderOpen, FolderSync, Image, Layers3, LayoutDashboard, ListTodo, LoaderCircle, Plus, RotateCcw, Settings2, ShieldCheck, Trash2, Upload, X, ChartNoAxesCombined, SlidersHorizontal, Database, AlertCircle } from 'lucide-react';
 import type { Evaluation, Experience, Project, ProjectBundle, TagAssignment, Walkthrough } from '../core/model';
-import { latestEvaluations, summarizeProject, validateProject, allowedSeverities } from '../core/assessment';
+import { latestEvaluations, summarizeProject, validateProject, validateWalkthrough, allowedSeverities } from '../core/assessment';
 import { createProject, exportProject, getProjectBundle, listProjects, restoreProject, saveEvaluation, saveProject, saveWalkthroughs } from '../storage/projects';
 import { listTrashedProjects, restartProject, restoreTrashedProject, trashProject, type TrashedProject } from '../storage/projectLifecycle';
 import ProjectLifecycleDialog, { type ProjectAction } from '../components/ProjectLifecycleDialog';
@@ -410,6 +410,8 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
   const [evidence, setEvidence] = useState('');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [issues, setIssues] = useState<{ target: string; message: string }[]>([]);
+  const fieldRefs = useRef<Record<string, HTMLElement | null>>({});
   const product = project.products.find(item => item.id === productId);
   const editTags = project.scheme.tags.filter(tag => tag.dimension === 'D');
 
@@ -423,6 +425,7 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
     setLicense(current?.commercialUse || 'unreviewed');
     setEvidence(current?.commercialEvidence || '');
     setDirty(false);
+    setIssues([]);
   }, [productId, project.updatedAt]);
 
   useEffect(() => {
@@ -432,19 +435,28 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
     return () => { window.removeEventListener('beforeunload', beforeUnload); window.dispatchEvent(new CustomEvent('formal-dirty', { detail: false })); };
   }, [dirty]);
 
-  function update(index: number, patch: Partial<Walkthrough>) { setTasks(previous => previous.map((task, i) => i === index ? { ...task, ...patch, status: 'draft' } : task)); setDirty(true); }
+  function update(index: number, patch: Partial<Walkthrough>) { setTasks(previous => previous.map((task, i) => i === index ? { ...task, ...patch, status: 'draft' } : task)); setDirty(true); setIssues(previous => previous.filter(issue => issue.target !== tasks[index]?.id)); }
+  function focusIssue(target: string) {
+    const element = fieldRefs.current[target];
+    element?.focus({ preventScroll: true }); element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
   async function save(submit: boolean) {
     if (!product) return;
     const amount = cost.trim() ? Number(cost) : null;
-    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) { onToast('总费用必须是非负数，未知请留空'); return; }
-    if (license !== 'unreviewed' && !evidence.trim()) { onToast('请填写商用授权判断的条款或来源依据'); return; }
-    if (submit) {
-      if (tasks.some(task => task.steps === null || !Number.isSafeInteger(task.steps) || task.steps < 0)) { onToast('请填写三个任务的操作步数'); return; }
-      if (tasks.some(task => !task.completed && (!task.tags.length || !task.notes.trim()))) { onToast('未完成任务需记录 D 问题标签和原因，不能按无问题计满分'); return; }
-      const anchorErrors = tasks.flatMap(task => ratingErrors(project.scheme, task.ratings, ['D'], isAnchorMode(project.scheme)));
-      if (anchorErrors.length) { onToast(anchorErrors[0]); return; }
-      if (!score || !Number.isInteger(Number(score)) || Number(score) < 1 || Number(score) > 5) { onToast('请给出整体体验分（1–5）'); return; }
+    const nextIssues: typeof issues = [];
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) nextIssues.push({ target: 'cost', message: '总费用必须是非负数，未知请留空' });
+    if (license !== 'unreviewed' && !evidence.trim()) nextIssues.push({ target: 'evidence', message: '请填写商用授权判断的条款或来源依据' });
+    for (const [index, task] of tasks.entries()) {
+      if (submit) {
+        nextIssues.push(...validateWalkthrough(project, task).map(message => ({ target: task.id, message: `${walkthroughTasks[index].name}：${message}` })));
+        if (!task.completed && !task.notes.trim()) nextIssues.push({ target: task.id, message: `${walkthroughTasks[index].name}：未完成目标，请说明原因` });
+      } else if (task.steps !== null && (!Number.isSafeInteger(task.steps) || task.steps < 0)) nextIssues.push({ target: task.id, message: `${walkthroughTasks[index].name}：操作步数须为非负整数；未记录可留空` });
     }
+    if (submit) {
+      if (!score || !Number.isInteger(Number(score)) || Number(score) < 1 || Number(score) > 5) nextIssues.push({ target: 'score', message: '请给出整体体验分（1–5）' });
+    }
+    setIssues(nextIssues);
+    if (nextIssues.length) { focusIssue(nextIssues[0].target); onToast('尚未保存，请检查页面标出的内容；点击提示可定位'); return; }
     setSaving(true);
     try {
       const nextProject = { ...project, products: project.products.map(item => item.id === productId ? { ...item, totalCost: amount, commercialUse: license, commercialEvidence: evidence } : item) };
@@ -459,10 +471,11 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
     <PageHeading eyebrow="PRODUCT WALKTHROUGH" title="编辑走查、成本与授权" description="记录产品级信息，补齐 D / E / G 维度和推荐资格。"/>
     <label className="formal-product-select">被测产品<select className="input" value={productId} disabled={saving} onChange={event => { if (dirty && !window.confirm('切换会丢失未保存的走查修改，是否继续？')) return; setProductId(event.target.value); }}>{project.products.map(item => <option key={item.id} value={item.id}>{item.name || '未命名产品'}{item.demo ? '（模拟）' : ''}</option>)}</select></label>
     <fieldset disabled={saving} className="formal-fieldset">
-      <section className="panel formal-walk-panel"><PanelHeading title="三个固定编辑任务" subtitle="请使用同一套底图完成任务，保留实际操作依据。"/>
-        {tasks.map((task, index) => <div className="formal-walk-task" key={task.id}>
+      <section className="panel formal-walk-panel"><PanelHeading title="三个固定编辑任务" subtitle="请使用同一套底图完成任务。操作步数选填，不参与 D 维度分数计算；未记录可留空，不会视为 0 步。"/>
+        {tasks.map((task, index) => <div className={`formal-walk-task${issues.some(issue => issue.target === task.id) ? ' has-error' : ''}`} key={task.id} ref={element => { fieldRefs.current[task.id] = element; }} tabIndex={-1}>
           <div className="formal-walk-title"><span>0{index + 1}</span><div><h3>{walkthroughTasks[index].name}</h3><p>{walkthroughTasks[index].request}</p></div><Pill tone={task.status === 'submitted' ? 'green' : 'neutral'}>{task.status === 'submitted' ? '已提交' : '草稿'}</Pill></div>
-          <div className="formal-walk-inputs"><label className="field">操作步数<input className="input" type="number" min="0" step="1" value={task.steps ?? ''} onChange={event => update(index, { steps: event.target.value === '' ? null : Number(event.target.value) })}/></label><label className="formal-checkbox"><input type="checkbox" checked={task.completed} onChange={event => update(index, { completed: event.target.checked })}/>已完成目标</label></div>
+          <div className="formal-walk-inputs"><label className="field">操作步数（选填）<input className="input" aria-label={`${walkthroughTasks[index].name}操作步数（选填）`} aria-invalid={task.steps !== null && (!Number.isSafeInteger(task.steps) || task.steps < 0)} type="number" min="0" step="1" placeholder="未记录可留空" value={task.steps ?? ''} onChange={event => update(index, { steps: event.target.value === '' ? null : Number(event.target.value) })}/></label><label className="formal-checkbox"><input type="checkbox" checked={task.completed} onChange={event => update(index, { completed: event.target.checked })}/>已完成目标</label></div>
+          {issues.filter(issue => issue.target === task.id).map((issue, i) => <p className="formal-walk-field-error" key={i}><AlertCircle size={14}/>{issue.message}</p>)}
           {isAnchorMode(project.scheme) && <AnchorRatings scheme={project.scheme} dimensions={['D']} values={task.ratings ?? {}} onChange={ratings => update(index, { ratings })}/>}
           <div className="formal-walk-tags">{editTags.map(tag => {
             const selected = task.tags.find(item => item.code === tag.code);
@@ -473,15 +486,16 @@ function FormalWalkthrough({ bundle, onSave, onToast }: { bundle: ProjectBundle;
       </section>
       <div className="formal-walk-bottom">
         <section className="panel formal-form-panel"><PanelHeading title="整体产品体验" subtitle={isAnchorMode(project.scheme) ? '与逐题 G 锚点分各占 G 维度的 50%。' : '与逐题 G 标签分各占 G 维度的 50%。'}/>
-          <label className="field">整体体验分<select className="input" value={score} onChange={event => { setScore(event.target.value); setDirty(true); }}><option value="">尚未打分</option><option value="5">5 · 操作顺畅，无需摸索</option><option value="4">4 · 少量不便，不影响完成</option><option value="3">3 · 需要摸索，或步骤偏多</option><option value="2">2 · 操作困难，勉强完成</option><option value="1">1 · 无法完成任务</option></select></label>
+          <label className="field">整体体验分<select className="input" ref={element => { fieldRefs.current.score = element; }} aria-invalid={issues.some(issue => issue.target === 'score')} value={score} onChange={event => { setScore(event.target.value); setDirty(true); setIssues(previous => previous.filter(issue => issue.target !== 'score')); }}><option value="">尚未打分</option><option value="5">5 · 操作顺畅，无需摸索</option><option value="4">4 · 少量不便，不影响完成</option><option value="3">3 · 需要摸索，或步骤偏多</option><option value="2">2 · 操作困难，勉强完成</option><option value="1">1 · 无法完成任务</option></select></label>
           <label className="field">体验依据（选填）<textarea className="input" rows={3} value={experienceNotes} onChange={event => { setExperienceNotes(event.target.value); setDirty(true); }}/></label>
-          <label className="field">评测期间总花费（统一币种）<input className="input" type="number" min="0" step="0.01" placeholder="未知留空；免费请明确填 0" value={cost} onChange={event => { setCost(event.target.value); setDirty(true); }}/></label>
+          <label className="field">评测期间总花费（统一币种）<input className="input" ref={element => { fieldRefs.current.cost = element; }} aria-invalid={issues.some(issue => issue.target === 'cost')} type="number" min="0" step="0.01" placeholder="未知留空；免费请明确填 0" value={cost} onChange={event => { setCost(event.target.value); setDirty(true); setIssues(previous => previous.filter(issue => issue.target !== 'cost')); }}/></label>
         </section>
         <section className="panel formal-form-panel"><PanelHeading title="商用授权检查" subtitle="未检查不等于已允许；明确不允许或条款不明确会触发一票否决。"/>
           <label className="field">检查结果<select className="input" value={license} onChange={event => { setLicense(event.target.value as typeof license); setDirty(true); }}><option value="unreviewed">尚未检查</option><option value="allowed">已查证：明确允许商用</option><option value="unclear">已检查：未明确允许商用</option><option value="forbidden">已查证：禁止商用</option></select></label>
-          <label className="field">条款、来源与核查说明<textarea className="input" rows={6} placeholder="粘贴相关条款摘要、来源链接和核查日期。" value={evidence} onChange={event => { setEvidence(event.target.value); setDirty(true); }}/></label>
+          <label className="field">条款、来源与核查说明<textarea className="input" ref={element => { fieldRefs.current.evidence = element; }} aria-invalid={issues.some(issue => issue.target === 'evidence')} rows={6} placeholder="粘贴相关条款摘要、来源链接和核查日期。" value={evidence} onChange={event => { setEvidence(event.target.value); setDirty(true); setIssues(previous => previous.filter(issue => issue.target !== 'evidence')); }}/></label>
         </section>
       </div>
+      {issues.length > 0 && <section className="formal-walk-errors" role="alert" aria-label="走查提交检查"><strong><AlertCircle size={17}/>还有 {issues.length} 项需要检查</strong><p>点击下方提示，可定位到对应任务或字段。操作步数可以留空。</p><ul>{issues.map((issue, index) => <li key={index}><button type="button" onClick={() => focusIssue(issue.target)}>{issue.message}<ArrowRight size={13}/></button></li>)}</ul></section>}
       <div className="formal-save-actions"><span>{dirty ? '有未保存修改' : '当前信息已载入'}</span><button className="btn" onClick={() => void save(false)}><Check size={15}/>保存草稿</button><button className="btn btn-primary" onClick={() => void save(true)}><CheckCircle2 size={15}/>提交走查与检查</button></div>
     </fieldset>
   </>;

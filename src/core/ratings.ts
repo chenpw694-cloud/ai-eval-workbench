@@ -2,8 +2,8 @@ import type { DimensionRatings, Scheme, TagAssignment } from './model.ts';
 export const ratedDimensions = ['A', 'B', 'C', 'D', 'F', 'G'] as const;
 export const questionDimensions = ['A', 'B', 'C', 'F', 'G'];
 export const imageRatingDimensions = ['A', 'B', 'C', 'F'];
-/** Used only when verifying archives produced before scoring reasons became optional. */
-export type RatingValidationOptions = { legacyRequiredReasons?: boolean };
+/** Preserve historical validation when verifying frozen archives. */
+export type RatingValidationOptions = { legacyRequiredReasons?: boolean; legacyRequiredWalkthroughSteps?: boolean };
 export const isAnchorMode = (scheme: Scheme) => scheme.rating?.mode === 'anchors';
 const descriptions: Record<string, string[]> = {
   A: ['商品、卖点或上架要求严重错误，无法使用', '商品关键信息明显偏差，仅能参考，需重新生成', '基本符合电商场景，需较大修改后使用', '商品与卖点准确，微调排版或细节即可使用', '商品、卖点、版式和上架要求均满足，可直接使用'],

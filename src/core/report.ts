@@ -9,13 +9,14 @@ import { selfComparisonEvidence } from './selfComparison.ts';
 
 export type ReportBasis = 'original' | 'adjudicated-reference';
 /** Frozen archives bind both validation policy and text; ordinary exports use the current version. */
-export type ReportVersion = 'report-v1' | 'report-v2' | 'report-v3';
+export type ReportVersion = 'report-v1' | 'report-v2' | 'report-v3' | 'report-v4';
 export type ReportBuildOptions = RatingValidationOptions & { reportVersion?: ReportVersion };
 export type ReportCheck = { id: string; title: string; passed: boolean; detail: string };
 const pct = (value: number | null) => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
 const num = (value: number | null, digits = 2) => value === null ? '—' : value.toFixed(digits);
 export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generatedAt: string, demo = false, options: ReportBuildOptions = {}) {
-  const selfOnly = (options.reportVersion ?? 'report-v3') === 'report-v3';
+  options = { ...options, legacyRequiredWalkthroughSteps: options.legacyRequiredWalkthroughSteps ?? (options.reportVersion !== undefined && options.reportVersion !== 'report-v4') };
+  const selfOnly = !['report-v1', 'report-v2'].includes(options.reportVersion ?? 'report-v4');
   const comparisons = selfComparisonEvidence(bundle, options);
   const state = bundle.quality;
   const notes = latestReportNotes(state?.reportNotes);
@@ -105,15 +106,16 @@ export function buildReport(bundle: ProjectBundle, basis: ReportBasis, generated
 }
 export type Report = ReturnType<typeof buildReport>;
 const cell = (value: unknown) => String(value ?? '—').replace(/\|/g,'\\|').replace(/[\r\n]+/g,' ');
-export function reportMarkdown(report: Report, reportVersion: ReportVersion = 'report-v3'): string {
+export function reportMarkdown(report: Report, reportVersion: ReportVersion = 'report-v4'): string {
   const product = (id: string) => report.project.products.find(p => p.id === id)?.name ?? id;
   const notes = report.notes;
-  const selfOnly = reportVersion === 'report-v3';
+  const selfOnly = reportVersion === 'report-v3' || reportVersion === 'report-v4';
   const lines = [`# ${report.project.name} · ${report.demo ? '界面演示报告' : '报告草稿'}`, '', '> 草稿，不代表项目已完成归档。缺失数据保留为空；原图需另存汇总主包。', '', `生成时间：${report.generatedAt}`, `统计口径：${report.basis === 'original' ? '原始初评' : '裁决口径参考分'}`, `规则：${report.project.schemeHash}`, `题库：${report.project.questionsHash}`, '', '## 结论与建议', '', notes?.summary || '待填写', '', '### 产品优势与短板', '', notes?.productInsights || '待填写', '', '### 对自家产品的启示', '', notes?.recommendations || '待填写', '', '## 综合对比', '', `| 产品 | 数据性质 | A | B | C | D | E | F | G | 总分 /${isAnchorMode(report.project.scheme) ? '5' : '100'} | 可用率 | 平均秒 | 可用图成本 | 推荐状态 |`, '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   const anchorMethod = reportVersion === 'report-v1'
     ? '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分并填写依据；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。'
     : '锚点直评分（扩展口径）：A/B/C/F/G 按配置锚点选 1–5 分，评分依据选填；D 为三个编辑任务的锚点分均值；E 仍由可用率/速度/成本计算；G 为逐题锚点分与整体走查各占一半。问题标签用于诊断与合规检查，不再换算分数。';
   const methods = ['## 评测方法', '', `项目背景：${report.project.background || '待填写'}`, `评测周期：${report.project.period || '待填写'}`, `评测集：${report.project.questions.length} 题；${report.project.members.length} 名成员；${report.project.products.filter(p=>!p.demo).length} 个真实对比对象。`, `维度权重：${report.project.scheme.dimensions.map(d=>`${d.id} ${d.name} ${d.weight}%`).join('；')}`, isAnchorMode(report.project.scheme) ? anchorMethod : '图像维度按该维度最严重标签换算 1–5 分；D 为固定编辑走查，E 为可用率/速度/成本，G 为逐题体验标签与整体走查各占一半。', '共同校准、独立复评、一致率及全量复查状态见下方检查；分组结果仅代表实际有效样本，不进行缺失值填补。', ''];
+  if (reportVersion === 'report-v4') methods.splice(-1, 0, '编辑走查的操作步数为选填补充信息，留空保持未知，不视为 0 步；D 维度仍依据已提交的任务结果与评分计算。');
   lines.splice(lines.indexOf('## 综合对比'), 0, ...methods);
   for (const row of report.results) lines.push(`| ${cell(product(row.productId))} | ${report.project.products.find(p=>p.id===row.productId)?.demo ? '模拟' : '真实对象'} | ${(['A','B','C','D','E','F','G'] as DimensionId[]).map(id=>`${num(row.dimensions[id].value)} (${row.dimensions[id].n}/${row.dimensions[id].expected})`).join(' | ')} | ${num(row.total === null ? null : row.total*(isAnchorMode(report.project.scheme)?1:20),isAnchorMode(report.project.scheme)?2:1)} | ${pct(row.usableRate)} | ${num(row.meanSeconds,1)} | ${num(row.costPerUsable,3)} | ${cell(row.eligibility)}${row.vetoReasons.length ? '：'+cell(row.vetoReasons.join('；')) : ''} |`);
   lines.push('', '维度值后的括号为已计入数量 / 应计数量；未齐全的维度仅作参考。完整总分需七维数据齐全。分组只列可按题汇总的 A/B/C/F，不把产品级 D/E/G 冒充为场景总分。', '', '## 分场景表现', '', '| 场景 | 产品 | 提交 | A | B | C | F |', '|---|---|---|---|---|---|---|');

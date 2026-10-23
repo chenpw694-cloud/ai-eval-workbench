@@ -76,7 +76,7 @@ test('new anchor archives roundtrip optional empty reasons and render clean scor
  for(const row of [...source.bundle.evaluations,...source.bundle.walkthroughs,...source.bundle.quality.judgments,...source.bundle.quality.decisions])for(const rating of Object.values(row.ratings??{}))rating.reason='';
  source.bundle.evaluations[0].ratings.B.reason='   ';
  const record=await build(source,{mode:'final'}),read=await readFinalArchive(files(record));
- assert.equal(record.manifest.reportVersion,'report-v3');
+ assert.equal(record.manifest.reportVersion,'report-v4');
  assert.equal(record.manifest.calculationVersion,'ecommerce-anchors-v1');
  assert.equal(read.report.status,'final');
  assert.equal(read.bundle.evaluations[0].ratings.A.reason,'');
@@ -163,4 +163,20 @@ test('v2 archives retain their joint-review checks and exact report content afte
  assert.equal(read.record.manifest.reportVersion,'report-v2');
  assert(read.report.checks.some(c=>c.id==='joint'&&!c.passed));
  assert.equal(read.report.comparison,undefined);
+});
+
+test('v4 archives roundtrip blank walkthrough steps; v3 archives retain their original missing-score result',async()=>{
+ const source=setup(false,true);source.bundle.walkthroughs.forEach(task=>task.steps=null);
+ const record=await build(source),current=await readFinalArchive(files(record));
+ assert.equal(record.manifest.reportVersion,'report-v4');assert.equal(current.report.results[0].dimensions.D.n,3);assert(current.bundle.walkthroughs.every(task=>task.steps===null));
+ const legacyFiles=await altered(record,async(manifest,list)=>{
+  manifest.reportVersion='report-v3';
+  const checked=archiveReadiness(source.bundle,manifest.basis,manifest.createdAt,input(),true,{reportVersion:'report-v3'});manifest.checks=checked.checks;
+  const archived=JSON.parse(await list.find(file=>file.name.endsWith('.report.json')).text());
+  Object.assign(archived,checked.report,{format:archived.format,status:archived.status,scope:archived.scope,checks:manifest.checks});
+  await replaceContent(manifest,list,'report-json',JSON.stringify(archived));
+  await replaceContent(manifest,list,'report-md',legacyArchivedMarkdown(source,manifest,'report-v3'));
+ });
+ const legacy=await readFinalArchive(legacyFiles);assert.equal(legacy.report.results[0].dimensions.D.n,0);assert.equal(legacy.report.results[0].dimensions.D.value,null);
+ assert(legacy.report.results[0].dimensions.D.reasons.some(message=>message.includes('操作步数未完整记录')));
 });

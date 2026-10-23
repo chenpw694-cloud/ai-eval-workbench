@@ -230,9 +230,11 @@ function scoreTags(project: Project, assignments: TagAssignment[], dimension: Di
   return dimensionScore(applicable.map(tag => tag.severity), true)!;
 }
 
-function walkthroughError(project: Project, walkthrough: Walkthrough, options: RatingValidationOptions): string[] {
+export function validateWalkthrough(project: Project, walkthrough: Walkthrough, options: RatingValidationOptions = {}): string[] {
   const reasons = tagErrors(project, walkthrough.tags, ['D']);
-  if (walkthrough.steps === null || !Number.isSafeInteger(walkthrough.steps) || walkthrough.steps < 0) reasons.push('操作步数未完整记录');
+  if (walkthrough.steps === null) {
+    if (options.legacyRequiredWalkthroughSteps) reasons.push('操作步数未完整记录');
+  } else if (!Number.isSafeInteger(walkthrough.steps) || walkthrough.steps < 0) reasons.push('操作步数须为非负整数；未记录可留空');
   reasons.push(...ratingErrors(project.scheme, walkthrough.ratings, ['D'], isAnchorMode(project.scheme), options));
   if (!walkthrough.completed && !walkthrough.tags.length) reasons.push('未完成的走查必须记录对应 D 标签');
   return reasons;
@@ -322,7 +324,7 @@ export function summarizeProject(bundle: ProjectBundle, options: RatingValidatio
     for (const task of walkthroughTasks) {
       const walks = bundle.walkthroughs.filter(walk => walk.projectId === project.id && walk.productId === product.id && walk.task === task);
       if (walks.length !== 1 || walks[0].status !== 'submitted') { dReasons.push(`走查 ${task} 未提交或存在重复记录`); continue; }
-      const errors = walkthroughError(project, walks[0], options);
+      const errors = validateWalkthrough(project, walks[0], options);
       if (errors.length) dReasons.push(...errors.map(error => `走查 ${task}：${error}`));
       else { const value = recordDimensionScore(project.scheme, walks[0], 'D', options); if (value !== null) dValues.push(value); }
     }
